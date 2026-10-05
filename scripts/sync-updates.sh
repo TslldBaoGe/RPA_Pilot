@@ -24,6 +24,7 @@
 #   ./sync-updates.sh --check                           # 只看现在是什么版本，不下载
 #   ./sync-updates.sh --force                           # 版本相同也重下（修复损坏的产物）
 #   GH_PROXY=https://gh-proxy.com ./sync-updates.sh     # 国内加速：安装包走镜像，latest.yml 仍直连
+#   DL_JOBS=8 ./sync-updates.sh                         # 分片并发数（默认 16；设 1 退回单流）
 #
 # cron（每 15 分钟）：
 #   */15 * * * * /usr/local/bin/sync-updates.sh >> /var/log/rpa-pilot-sync.log 2>&1
@@ -46,10 +47,20 @@ ASSET_PREFIX="${ASSET_PREFIX:-RPA_Pilot}"  # 安装包名前缀，用于清理�
 # 例：GH_PROXY=https://gh-proxy.com（留空则全部直连）
 GH_PROXY="${GH_PROXY:-}"
 
-# 只有在交互终端里才显示下载进度条；cron 或输出重定向到日志时保持安静，
-# 否则 curl 的 \r 控制符会把日志文件弄脏。
+# 进度显示：只有交互终端里才显示，cron / 重定向到日志时保持安静（免得 \r 弄脏日志）。
+# 注意：curl 的 -s 会把进度一起吞掉，所以「要进度」和「要安静」是互斥的两套参数，不能同时给。
+CURL_QUIET=(-s)
 CURL_PROGRESS=()
-[ -t 2 ] && CURL_PROGRESS=(--progress-bar)
+if [ -t 2 ]; then
+    CURL_QUIET=()
+    CURL_PROGRESS=(--progress-bar)
+fi
+
+# 分片（多连接）下载的并发数。跨境 / 代理链路上单连接被限得很死，
+# 多开并发基本线性提速 —— 实测同一条镜像链路下载 10 MB：
+#   1 条 86s(121KB/s) / 4 条 33s(319KB/s) / 8 条 18s(576KB/s) / 16 条 10s(1036KB/s) / 32 条 7s(1433KB/s)
+# 取 16 作为默认（约 1 MB/s，120 MB 从十几分钟降到约 2 分钟）；设 DL_JOBS=1 可关掉分片。
+DL_JOBS="${DL_JOBS:-16}"
 
 FORCE=0
 CHECK_ONLY=0
@@ -109,6 +120,90 @@ asset_url() {
     fi
 }
 
+# 安装包大小写在 latest.yml 的 files[] 下面（有缩进），所以不能直接用 read_field
+read_pkg_size() {
+    sed -n 's/^[[:space:]]*size:[[:space:]]*//p' "$1" 2>/dev/null | head -1 | tr -d '\r' | tr -cd '0-9'
+}
+
+# 字节数格式化，给进度显示用
+human() {
+    awk -v n="${1:-0}" 'BEGIN {
+        if (n >= 1048576) printf "%.1f MB", n / 1048576
+        else if (n >= 1024) printf "%.0f KB", n / 1024
+        else printf "%d B", n
+    }'
+}
+
+# 服务器是否支持 Range（分片下载的前提）。小探测一次即可，避免分片时才发现不支持。
+supports_range() {
+    local code
+    code="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 20 --max-time 30 -r 0-0 "$1" 2>/dev/null || true)"
+    [ "$code" = "206" ]
+}
+
+# 多连接分片下载。
+# 为什么要它：跨境 / 代理链路上单连接常被限速（实测单流约 400 KB/s，120 MB 要 5 分钟），
+# 多开几条并发连接通常能把总带宽吃回来。
+# 只在「文件够大 + 支持 Range」时启用；任一片失败或片大小对不上就整体放弃，
+# 由调用方回退到单流下载 —— 宁可慢，也不能拼出个残缺文件。
+download_segments() {
+    local url="$1" dest="$2" size="$3" jobs="${4:-4}" max_time="${5:-1800}"
+
+    [ "$jobs" -gt 1 ] || return 1
+    case "$size" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$size" -ge 4194304 ] || return 1      # 小于 4 MB 不值得分片
+    supports_range "$url" || return 1
+
+    local dir; dir="$(mktemp -d)" || return 1
+    local chunk=$(( (size + jobs - 1) / jobs ))
+    local pids=() i start end part
+    for ((i = 0; i < jobs; i++)); do
+        start=$(( i * chunk ))
+        [ "$start" -ge "$size" ] && break
+        end=$(( start + chunk - 1 ))
+        [ "$end" -ge "$size" ] && end=$(( size - 1 ))
+        # 文件名补零，保证 cat 拼接时顺序正确
+        part="$(printf '%s/part.%03d' "$dir" "$i")"
+        curl -fL "${CURL_QUIET[@]+"${CURL_QUIET[@]}"}" --connect-timeout 20 --max-time "$max_time" \
+            --speed-limit 512 --speed-time 60 -r "${start}-${end}" "$url" -o "$part" &
+        pids+=("$!")
+    done
+    [ "${#pids[@]}" -gt 0 ] || { rm -rf "$dir"; return 1; }
+
+    # 终端下给一条聚合进度；非终端则安静等待
+    if [ "${#CURL_PROGRESS[@]}" -gt 0 ]; then
+        local got alive f p
+        while :; do
+            got=0; alive=0
+            for f in "$dir"/part.*; do
+                [ -f "$f" ] && got=$(( got + $(stat -c %s "$f" 2>/dev/null || echo 0) ))
+            done
+            printf '\r    %s / %s (%d%%)   ' "$(human "$got")" "$(human "$size")" "$(( got * 100 / size ))"
+            for p in "${pids[@]}"; do kill -0 "$p" 2>/dev/null && alive=1; done
+            [ "$alive" = "0" ] && break
+            sleep 1
+        done
+        printf '\n'
+    fi
+
+    local failed=0 p
+    for p in "${pids[@]}"; do wait "$p" || failed=1; done
+    [ "$failed" = "1" ] && { rm -rf "$dir"; return 1; }
+
+    local total=0 f
+    for f in "$dir"/part.*; do
+        [ -f "$f" ] && total=$(( total + $(stat -c %s "$f" 2>/dev/null || echo 0) ))
+    done
+    if [ "$total" != "$size" ]; then
+        warn "分片总大小 ${total} 与期望 ${size} 不符，放弃分片结果"
+        rm -rf "$dir"; return 1
+    fi
+
+    cat "$dir"/part.* > "$dest" || { rm -rf "$dir"; return 1; }
+    rm -rf "$dir"
+    return 0
+}
+
 # 校验安装包的 sha512（latest.yml 里存的是 base64）。校验工具缺失时告警并跳过，不阻塞同步。
 verify_sha512() {
     local file="$1" expected="$2"
@@ -120,23 +215,45 @@ verify_sha512() {
     [ "$got" = "$expected" ]
 }
 
-# 下载一个资产：优先走镜像（若配了），失败再直连 GitHub
+# 下载一个资产。逐级回退：镜像分片 → 镜像单流 → 直连分片 → 直连单流。
+# size 已知（来自 latest.yml）且服务器支持 Range 时才会走分片。
 download_asset() {
-    local name="$1" dest="$2" max_time="$3"
+    local name="$1" dest="$2" max_time="$3" size="${4:-0}"
+    local url jobs_note=""
+
+    # 大小已知且够大才可能分片；小文件（如 blockmap）不必刷「多少条连接」
+    if [ -n "$size" ] && [ "$size" -ge 4194304 ] 2>/dev/null; then
+        jobs_note="，最多 ${DL_JOBS} 条连接"
+    fi
+
     if [ -n "$GH_PROXY" ]; then
-        info "下载 ${name}（加速镜像 ${GH_PROXY}）"
-        if curl -fsSL "${CURL_PROGRESS[@]+"${CURL_PROGRESS[@]}"}" \
+        url="$(asset_url "$name" 1)"
+        info "下载 ${name}（加速镜像 ${GH_PROXY}${jobs_note}）"
+        if download_segments "$url" "$dest" "$size" "$DL_JOBS" "$max_time"; then
+            info "  分片下载完成"
+            return 0
+        fi
+        if [ -n "$jobs_note" ]; then
+            warn "分片不可用或失败，改用单流下载"
+        fi
+        if curl -fL "${CURL_QUIET[@]+"${CURL_QUIET[@]}"}" "${CURL_PROGRESS[@]+"${CURL_PROGRESS[@]}"}" \
                 --retry 2 --retry-delay 2 --connect-timeout 20 --max-time "$max_time" \
-                --speed-limit 1024 --speed-time 120 "$(asset_url "$name" 1)" -o "$dest"; then
+                --speed-limit 1024 --speed-time 120 "$url" -o "$dest"; then
             return 0
         fi
         warn "镜像下载 ${name} 失败，改直连 GitHub 重试"
     else
-        info "下载 ${name}"
+        info "下载 ${name}${jobs_note}"
     fi
-    curl -fsSL "${CURL_PROGRESS[@]+"${CURL_PROGRESS[@]}"}" \
+
+    url="$(asset_url "$name" 0)"
+    if download_segments "$url" "$dest" "$size" "$DL_JOBS" "$max_time"; then
+        info "  分片下载完成"
+        return 0
+    fi
+    curl -fL "${CURL_QUIET[@]+"${CURL_QUIET[@]}"}" "${CURL_PROGRESS[@]+"${CURL_PROGRESS[@]}"}" \
         --retry 3 --retry-delay 2 --connect-timeout 20 --max-time "$max_time" \
-        --speed-limit 1024 --speed-time 120 "$(asset_url "$name" 0)" -o "$dest"
+        --speed-limit 1024 --speed-time 120 "$url" -o "$dest"
 }
 
 info "开始同步：仓库 $REPO → 目标目录 $TARGET_DIR"
@@ -230,7 +347,9 @@ fi
 # 必须设 --max-time：只设 --connect-timeout 的话，服务器接受连接后卡住不响应，
 # curl 会一直挂着，而锁也就一直被占住 —— 之后每次 cron 都只能跳过。
 # --speed-limit/--speed-time 进一步防「连上了但传输停滞」。
-download_asset "${PACKAGE}" "${TMP_DIR}/${PACKAGE}" 1800 \
+# 安装包大小取自 latest.yml，用来做多连接分片；没有就退回单流。
+PKG_SIZE="$(read_pkg_size "${TMP_DIR}/latest.yml")"
+download_asset "${PACKAGE}" "${TMP_DIR}/${PACKAGE}" 1800 "$PKG_SIZE" \
     || die "下载安装包失败：${RELEASE_BASE}/${PACKAGE}"
 
 # 校验 sha512：latest.yml 是直连 GitHub 取的（可信来源），拿它来验安装包。
