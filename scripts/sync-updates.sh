@@ -89,12 +89,30 @@ info "开始同步：仓库 $REPO → 目标目录 $TARGET_DIR"
 
 mkdir -p "$TARGET_DIR" || die "无法创建目标目录 $TARGET_DIR"
 
-# 用 mkdir 做锁：它在所有文件系统上都是原子操作，不需要 flock
+# 用 mkdir 做锁：它在所有文件系统上都是原子操作，不需要 flock。
+# 但不能只会「加锁」—— 进程被 kill 或机器断电时锁目录会留下来，
+# 那样之后每次 cron 都会「跳过」，更新就无声无息地永久停掉了。
+# 所以锁里记下持有者的 PID，发现持有者已经不在了就自动清理。
 LOCK_DIR="${TARGET_DIR}/.sync-lock"
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    warn "上一次同步还在进行（或上次异常退出留下了 ${LOCK_DIR}），本次跳过"
-    exit 0
+    HOLDER=""
+    [ -f "${LOCK_DIR}/pid" ] && HOLDER="$(cat "${LOCK_DIR}/pid" 2>/dev/null || true)"
+
+    if [ -n "$HOLDER" ] && kill -0 "$HOLDER" 2>/dev/null; then
+        warn "上一次同步（PID ${HOLDER}）还在进行，本次跳过"
+        exit 0
+    fi
+
+    if [ -n "$HOLDER" ]; then
+        warn "发现陈旧锁：持有者 PID ${HOLDER} 已不存在，自动清理后继续"
+    else
+        warn "发现陈旧锁：没有 PID 记录（多半是旧版本或被强杀留下的），自动清理后继续"
+    fi
+
+    rm -rf "$LOCK_DIR"
+    mkdir "$LOCK_DIR" 2>/dev/null || { warn "清理陈旧锁后仍无法加锁，本次跳过"; exit 0; }
 fi
+echo $$ > "${LOCK_DIR}/pid"
 
 TMP_DIR=""
 cleanup() {
@@ -107,7 +125,7 @@ TMP_DIR="$(mktemp -d)" || die "无法创建临时目录"
 
 # ── 1) 先把 latest.yml 下到临时目录（注意：只是下载，还没发布）──
 info "读取远端最新版本信息"
-if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 \
+if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 120 \
         "${RELEASE_BASE}/latest.yml" -o "${TMP_DIR}/latest.yml"; then
     die "下载 latest.yml 失败：${RELEASE_BASE}/latest.yml（检查仓库是否有 Release、网络是否通）"
 fi
@@ -146,13 +164,17 @@ fi
 
 # ── 3) 下载安装包与差量索引 ─────────────────────────────
 info "下载 ${PACKAGE}"
-curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 \
+# 必须设 --max-time：只设 --connect-timeout 的话，服务器接受连接后卡住不响应，
+# curl 会一直挂着，而锁也就一直被占住 —— 之后每次 cron 都只能跳过。
+# --speed-limit/--speed-time 进一步防「连上了但传输停滞」。
+curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 1800 \
+    --speed-limit 1024 --speed-time 120 \
     "${RELEASE_BASE}/${PACKAGE}" -o "${TMP_DIR}/${PACKAGE}" \
     || die "下载安装包失败：${RELEASE_BASE}/${PACKAGE}"
 
 info "下载 ${BLOCKMAP}"
 # blockmap 缺失不该让整个同步失败：没有它只是退化成整包下载，功能不受影响
-if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 \
+if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 300 \
         "${RELEASE_BASE}/${BLOCKMAP}" -o "${TMP_DIR}/${BLOCKMAP}"; then
     warn "下载 blockmap 失败，将跳过差量索引（客户端会整包下载）"
     rm -f "${TMP_DIR}/${BLOCKMAP}"
