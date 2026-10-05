@@ -355,7 +355,7 @@ server {
 
     location = /latest.yml {
         add_header Cache-Control "no-store" always;
-        return 302 ${COS_ORIGIN}${COS_PATH_PREFIX}/latest.yml;
+        return 302 ${COS_ORIGIN}${COS_PATH_PREFIX}\$request_uri;
     }
 
     location ~ ^/(RPA_Pilot-[^/]+\.exe|RPA_Pilot-[^/]+\.exe\.blockmap)\$ {
@@ -489,10 +489,16 @@ server {
     listen 80;
     server_name _;
 
-    # latest.yml 必须每次拿最新的，不能被任何一层缓存住
+    # latest.yml 必须每次拿最新的，不能被任何一层缓存住。
+    # 用 \$request_uri 保留 electron-updater 加的 ?noCache=xxx：
+    #   - 实测 COS 对未知查询参数是忽略的（仍返回 NoSuchKey，不报签名/参数错），
+    #     所以透传安全；
+    #   - 保留后每次请求的 URL 都不同，客户端的 HTTP 缓存就不可能命中旧版本清单。
+    #     反之如果把查询串丢掉，latest.yml 的 URL 恒定，客户端有可能一直读到旧版，
+    #     表现为「检查更新永远说已是最新」。
     location = /latest.yml {
         add_header Cache-Control "no-store" always;
-        return 302 ${COS_ORIGIN}${COS_PATH_PREFIX}/latest.yml;
+        return 302 ${COS_ORIGIN}${COS_PATH_PREFIX}\$request_uri;
     }
 
     # 安装包与 blockmap 原样跳到 COS。
