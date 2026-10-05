@@ -24,6 +24,12 @@
 #   NGINX_START=1                        仅在 SERVE_MODE=nginx 时用于「启动宿主机 nginx」
 #   SKIP_FIREWALL=1 SKIP_CHECK=1 NGINX_MODE=skip
 #
+# 把产物放到对象存储（推荐：服务器只回 302，字节由 COS 直出）：
+#   COS_BUCKET=rpa-pilot-1300000000 COS_REGION=ap-guangzhou \
+#   COS_SECRET_ID=xxx COS_SECRET_KEY=xxx \
+#   sudo -E bash scripts/deploy-server.sh
+#   可选：COS_PREFIX=updates（对象键前缀）、COS_BASE=https://自定义域名
+#
 set -euo pipefail
 
 # ── 默认配置 ────────────────────────────────────────────
@@ -38,6 +44,21 @@ WRAPPER_PATH="${WRAPPER_PATH:-/usr/local/bin/rpa-sync}"
 CRON_SCHEDULE="${CRON_SCHEDULE:-*/15 * * * *}"
 # 默认不装 cron，改由人工执行 rpa-sync；要定时自动拉就设 ENABLE_CRON=1
 ENABLE_CRON="${ENABLE_CRON:-0}"
+
+# ── 可选：把产物放到对象存储，服务器只做 302 跳转 ──────────
+# 为什么要这样：更新服务器在境外、跨境链路实测只有几 KB/s ~ 几百 KB/s，
+# 而客户端在国内。让服务器只回一个 302，实际字节由 COS 直出，
+# 客户端速度能到 MB/s，服务器也不再有带宽压力。
+#
+# 设了 COS_BUCKET（+ COS_REGION）就启用；不设则维持「服务器本地提供文件」。
+# COS_BASE 一般不用手填，会按 bucket+region 推出来；用自定义域名时再覆盖。
+COS_BUCKET="${COS_BUCKET:-}"
+COS_REGION="${COS_REGION:-ap-guangzhou}"
+COS_PREFIX="${COS_PREFIX:-}"
+COS_BASE="${COS_BASE:-}"
+COS_CONF_FILE="${COS_CONF_FILE:-/etc/rpa-pilot/redirect.conf}"
+COS_CLI_CONFIG="${COS_CLI_CONFIG:-/etc/rpa-pilot/cos.yaml}"
+COS_UPLOAD_BIN="${COS_UPLOAD_BIN:-/usr/local/bin/cos-upload.sh}"
 
 # 默认用独立容器提供服务：和宿主机上已有的站点（尤其是别人的 Docker 容器）完全隔离。
 # 很多机器上 80 端口属于另一个项目，动宿主机 nginx 容易把别人的站搞挂。
@@ -81,6 +102,38 @@ fi
 # 既容易互相干扰，也可能把不该公开的东西一起挂出去。
 TARGET_DIR="${TARGET_DIR:-${REPO_ROOT}/updates}"
 
+# COS 的对外访问域名：设了 COS_BUCKET 就自动推导（COS_BASE 可覆盖，用于自定义域名）
+if [ -n "$COS_BUCKET" ] && [ -z "$COS_BASE" ]; then
+    COS_BASE="https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com"
+fi
+
+# 把 COS_BASE 拆成「源」和「路径前缀」两部分，拼 302 目标时才不会重复或漏掉斜杠
+COS_ORIGIN=""
+COS_PATH_PREFIX=""
+if [ -n "$COS_BASE" ]; then
+    COS_ORIGIN="$COS_BASE"
+    case "$COS_ORIGIN" in
+        *://*) ;;
+        *) COS_ORIGIN="https://${COS_ORIGIN}" ;;
+    esac
+    # 协议 + 主机之后若还有路径，就是对象键前缀
+    COS_REST="${COS_ORIGIN#*://}"
+    case "$COS_REST" in
+        */*)
+            COS_ORIGIN="${COS_ORIGIN%%/${COS_REST#*/}}"
+            COS_PATH_PREFIX="/${COS_REST#*/}"
+            COS_PATH_PREFIX="${COS_PATH_PREFIX%/}"
+            ;;
+    esac
+    if [ -n "$COS_PREFIX" ]; then
+        COS_PATH_PREFIX="${COS_PATH_PREFIX}/${COS_PREFIX#/}"
+        COS_PATH_PREFIX="${COS_PATH_PREFIX%/}"
+    fi
+fi
+
+USE_COS=0
+[ -n "$COS_BUCKET" ] && USE_COS=1
+
 # 自动识别 Web 服务账号：不同发行版不一样
 detect_web_user() {
     for candidate in nginx www-data apache httpd; do
@@ -99,6 +152,12 @@ info "仓库目录  : ${REPO_ROOT}"
 info "更新目录  : ${TARGET_DIR}"
 info "监听端口  : ${PORT}"
 info "提供服务  : ${SERVE_MODE}（auto = 有 docker 就用独立容器）"
+if [ "$USE_COS" = "1" ]; then
+    info "产物分发  : 302 跳转到 COS → ${COS_BASE}"
+    info "            （客户端实际字节由 COS 直出，不再占用本机带宽）"
+else
+    info "产物分发  : 本机直接提供文件"
+fi
 
 # ── 1) 更新目录 ─────────────────────────────────────────
 step "1/6 准备更新目录"
@@ -124,18 +183,83 @@ ok "语法检查通过"
 # 不带参数直接跑会同步到错的地方。
 cat > "$WRAPPER_PATH" <<EOF
 #!/usr/bin/env bash
-# 由 scripts/deploy-server.sh 生成。拉取最新更新包到更新目录。
-# 用法：sudo rpa-sync            （同步到最新版）
-#       sudo rpa-sync --check    （只看远端是什么版本，不下载）
+# 由 scripts/deploy-server.sh 生成。
+# 用法：sudo rpa-sync            （拉取最新版$([ "$USE_COS" = "1" ] && echo "，并上传到 COS")）
+#       sudo rpa-sync --check    （只看远端是什么版本，不下载、不上传）
 #       sudo rpa-sync --force    （版本相同也重下，用于修复损坏的产物）
-exec ${BIN_PATH} \\
+set -euo pipefail
+
+# --check 只查版本，不要顺手往 COS 传东西
+UPLOAD=1
+for arg in "\$@"; do
+  [ "\$arg" = "--check" ] && UPLOAD=0
+done
+
+${BIN_PATH} \\
   --target '${TARGET_DIR}' \\
   --owner '${WEB_USER}' \\
   --keep '${KEEP}' \\
   "\$@"
 EOF
+if [ "$USE_COS" = "1" ]; then
+    cat >> "$WRAPPER_PATH" <<EOF
+
+if [ "\$UPLOAD" = "1" ]; then
+  ${COS_UPLOAD_BIN} \\
+    --target '${TARGET_DIR}' \\
+    --bucket '${COS_BUCKET}' \\
+    --region '${COS_REGION}' \\
+    --config '${COS_CLI_CONFIG}'
+fi
+EOF
+fi
 chmod 0755 "$WRAPPER_PATH"
 ok "已生成便捷命令 ${WRAPPER_PATH}"
+
+# ── 启用了 COS：安装上传脚本 + 写 coscli 凭据 ────────────
+if [ "$USE_COS" = "1" ]; then
+    COS_SRC="${SCRIPT_DIR}/cos-upload.sh"
+    if [ ! -f "$COS_SRC" ]; then
+        warn "同目录下没找到 cos-upload.sh，尝试从 GitHub 拉取"
+        COS_SRC="/tmp/cos-upload.sh.$$"
+        curl -fsSL -o "$COS_SRC" "https://raw.githubusercontent.com/${REPO}/main/scripts/cos-upload.sh" \
+            || die "拉取 cos-upload.sh 失败（确认服务器能访问 github.com）"
+        ok "已从 GitHub 获取 cos-upload.sh"
+    fi
+    install -m 0755 "$COS_SRC" "$COS_UPLOAD_BIN"
+    bash -n "$COS_UPLOAD_BIN" || die "cos-upload.sh 语法检查失败"
+    ok "${COS_UPLOAD_BIN}"
+
+    mkdir -p "$(dirname "$COS_CLI_CONFIG")"
+    if [ -n "${COS_SECRET_ID:-}" ] && [ -n "${COS_SECRET_KEY:-}" ]; then
+        cat > "$COS_CLI_CONFIG" <<YAML
+cos:
+  base:
+    secretid: ${COS_SECRET_ID}
+    secretkey: ${COS_SECRET_KEY}
+    protocol: https
+  buckets:
+    - name: ${COS_BUCKET}
+      alias: rpapilot
+      region: ${COS_REGION}
+YAML
+        chmod 600 "$COS_CLI_CONFIG"
+        ok "已写入 ${COS_CLI_CONFIG}（权限 600，含密钥）"
+    elif [ -f "$COS_CLI_CONFIG" ]; then
+        info "${COS_CLI_CONFIG} 已存在，保留现有凭据"
+        info "（要换密钥就带 COS_SECRET_ID / COS_SECRET_KEY 重跑本脚本）"
+    else
+        warn "没有提供 COS_SECRET_ID / COS_SECRET_KEY，${COS_CLI_CONFIG} 未创建"
+        warn "上传会失败。请去腾讯云 → 访问管理 → API 密钥 建一对（建议用子账号，只给这个桶的读写权限）"
+    fi
+
+    if ! command -v coscli >/dev/null 2>&1 && ! command -v coscmd >/dev/null 2>&1; then
+        warn "服务器上还没有 coscli。上传脚本会报错，先装它："
+        info "  curl -fsSL -o /usr/local/bin/coscli https://github.com/tencentyun/coscli/releases/latest/download/coscli-linux"
+        info "  chmod +x /usr/local/bin/coscli"
+        info "（github.com 拉不动的话，在能上网的机器下好再 scp 上去）"
+    fi
+fi
 
 # ── 3) 提供 HTTP 服务 ───────────────────────────────────
 step "3/6 提供 HTTP 服务（端口 ${PORT}）"
@@ -166,14 +290,22 @@ setup_docker_serving() {
     fi
 
     if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
-        local cur_port cur_src running
+        local cur_port cur_src cur_conf running
         cur_port="$(docker inspect -f '{{range .HostConfig.PortBindings}}{{range .}}{{.HostPort}}{{end}}{{end}}' "$CONTAINER_NAME" 2>/dev/null || true)"
         cur_src="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/usr/share/nginx/html"}}{{.Source}}{{end}}{{end}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+        cur_conf="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/etc/nginx/conf.d/default.conf"}}{{.Source}}{{end}}{{end}}' "$CONTAINER_NAME" 2>/dev/null || true)"
         running="$(docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || echo false)"
 
-        if [ "$cur_port" = "$PORT" ] && [ "$cur_src" = "$TARGET_DIR" ]; then
+        local want_conf=""
+        [ "$USE_COS" = "1" ] && want_conf="$COS_CONF_FILE"
+
+        if [ "$cur_port" = "$PORT" ] && [ "$cur_src" = "$TARGET_DIR" ] && [ "$cur_conf" = "$want_conf" ]; then
             if [ "$running" = "true" ]; then
                 ok "容器 ${CONTAINER_NAME} 已在运行且参数一致，无需改动"
+                # 配置内容可能变了（比如刚切到 COS），nginx 只在启动时读配置
+                if [ "$USE_COS" = "1" ] && [ "$conf_changed" = "1" ]; then
+                    docker restart "$CONTAINER_NAME" >/dev/null && ok "配置有更新，已重启容器使其生效"
+                fi
             else
                 docker start "$CONTAINER_NAME" >/dev/null && ok "已启动已有容器 ${CONTAINER_NAME}"
             fi
@@ -181,18 +313,28 @@ setup_docker_serving() {
         fi
 
         warn "已有容器 ${CONTAINER_NAME} 的参数与本次不同，将重建"
-        info "  现有：端口 ${cur_port:-?}，目录 ${cur_src:-?}"
-        info "  目标：端口 ${PORT}，目录 ${TARGET_DIR}"
+        info "  现有：端口 ${cur_port:-?}，目录 ${cur_src:-?}，配置 ${cur_conf:-（无）}"
+        info "  目标：端口 ${PORT}，目录 ${TARGET_DIR}，配置 ${want_conf:-（无）}"
         docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || { warn "删除旧容器失败"; return 1; }
     fi
 
-    docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
-        -p "${PORT}:80" \
-        -v "${TARGET_DIR}:/usr/share/nginx/html:ro" \
-        "$IMAGE" >/dev/null || { warn "创建容器失败"; return 1; }
-
-    ok "已启动容器 ${CONTAINER_NAME}（镜像 ${IMAGE}，宿主 ${PORT} → 容器 80）"
-    info "挂载：${TARGET_DIR} → /usr/share/nginx/html（只读）"
+    if [ "$USE_COS" = "1" ]; then
+        docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
+            -p "${PORT}:80" \
+            -v "${TARGET_DIR}:/usr/share/nginx/html:ro" \
+            -v "${COS_CONF_FILE}:/etc/nginx/conf.d/default.conf:ro" \
+            "$IMAGE" >/dev/null || { warn "创建容器失败"; return 1; }
+        ok "已启动容器 ${CONTAINER_NAME}（镜像 ${IMAGE}，宿主 ${PORT} → 容器 80）"
+        info "挂载：${TARGET_DIR} → /usr/share/nginx/html（只读）"
+        info "      ${COS_CONF_FILE} → /etc/nginx/conf.d/default.conf（只读，302 跳转规则）"
+    else
+        docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
+            -p "${PORT}:80" \
+            -v "${TARGET_DIR}:/usr/share/nginx/html:ro" \
+            "$IMAGE" >/dev/null || { warn "创建容器失败"; return 1; }
+        ok "已启动容器 ${CONTAINER_NAME}（镜像 ${IMAGE}，宿主 ${PORT} → 容器 80）"
+        info "挂载：${TARGET_DIR} → /usr/share/nginx/html（只读）"
+    fi
 }
 
 # 用宿主机 nginx 提供服务（备选方案；不会主动启动或重启它）
@@ -203,6 +345,31 @@ setup_nginx_serving() {
     fi
 
     render_server_block() {
+        if [ "$USE_COS" = "1" ]; then
+            cat <<EOF
+# 由 scripts/deploy-server.sh 生成，请勿手工修改（会被覆盖）
+# 只做 302 跳转到 COS，实际字节不经过本机
+server {
+    listen ${PORT};
+    server_name ${SERVER_NAME};
+
+    location = /latest.yml {
+        add_header Cache-Control "no-store" always;
+        return 302 ${COS_ORIGIN}${COS_PATH_PREFIX}/latest.yml;
+    }
+
+    location ~ ^/(RPA_Pilot-[^/]+\.exe|RPA_Pilot-[^/]+\.exe\.blockmap)\$ {
+        return 302 ${COS_ORIGIN}${COS_PATH_PREFIX}\$uri;
+    }
+
+    location / {
+        return 404;
+    }
+}
+EOF
+            return
+        fi
+
         cat <<EOF
 # 由 scripts/deploy-server.sh 生成，请勿手工修改（会被覆盖）
 server {
@@ -302,6 +469,57 @@ EOF
     return 0
 }
 
+# ── 启用 COS 时先生成 302 跳转配置（容器要挂它）──────────
+conf_changed=0
+if [ "$USE_COS" = "1" ]; then
+    mkdir -p "$(dirname "$COS_CONF_FILE")"
+    NEW_CONF="$(mktemp)"
+    cat > "$NEW_CONF" <<EOF
+# 由 scripts/deploy-server.sh 生成，请勿手工修改（重跑脚本会覆盖）
+#
+# 这个 server 只做一件事：把更新产物的请求 302 跳转到 COS。
+#
+# 为什么这么做：更新服务器在境外，实测跨境链路只有几 KB/s ~ 几百 KB/s，
+# 客户端在国内根本下不动 115 MB 的安装包。改成跳转后，
+# 实际字节由 COS 直出（国内 MB/s 级），这台机器只剩几百字节的跳转发开销。
+#
+# 客户端会跟随 302（electron-updater 的 maxRedirects = 10），
+# 所以**不需要重新打包客户端** —— 更新源地址仍然指向这台机器即可。
+server {
+    listen 80;
+    server_name _;
+
+    # latest.yml 必须每次拿最新的，不能被任何一层缓存住
+    location = /latest.yml {
+        add_header Cache-Control "no-store" always;
+        return 302 ${COS_ORIGIN}${COS_PATH_PREFIX}/latest.yml;
+    }
+
+    # 安装包与 blockmap 原样跳到 COS。
+    # 用 \$uri 而不是 \$request_uri：丢掉查询串
+    # （electron-updater 会加 ?noCache=xxx），免得把未知参数透传给 COS。
+    location ~ ^/(RPA_Pilot-[^/]+\.exe|RPA_Pilot-[^/]+\.exe\.blockmap)\$ {
+        return 302 ${COS_ORIGIN}${COS_PATH_PREFIX}\$uri;
+    }
+
+    # 其它一律 404，避免把目录里的别的东西暴露出去
+    location / {
+        return 404;
+    }
+}
+EOF
+    if [ -f "$COS_CONF_FILE" ] && cmp -s "$NEW_CONF" "$COS_CONF_FILE"; then
+        rm -f "$NEW_CONF"
+        info "302 跳转配置无变化：${COS_CONF_FILE}"
+    else
+        mv "$NEW_CONF" "$COS_CONF_FILE"
+        chmod 644 "$COS_CONF_FILE"
+        conf_changed=1
+        ok "已生成 302 跳转配置：${COS_CONF_FILE}"
+        info "  跳转目标：${COS_ORIGIN}${COS_PATH_PREFIX}/"
+    fi
+fi
+
 case "$SERVE_MODE" in
     docker)
         setup_docker_serving || die "Docker 方式部署失败（细节见上）。可以改用 SERVE_MODE=nginx"
@@ -399,6 +617,44 @@ fi
 
 # ── 汇总 ────────────────────────────────────────────────
 printf '\n\033[1;32m部署完成\033[0m\n\n'
+if [ "$USE_COS" = "1" ]; then
+cat <<EOF
+日常就一条命令（没有装 cron，完全由你手动控制）：
+
+  拉取最新版并上传到 COS：  sudo ${WRAPPER_PATH}
+  只看远端版本：            sudo ${WRAPPER_PATH} --check
+  强制重下：                sudo ${WRAPPER_PATH} --force
+
+验证（关键：确认 302 真的跳到 COS）：
+
+  # 1) 本机应当返回 302 且 Location 指向 COS
+  curl -sI http://127.0.0.1:${PORT}/latest.yml | grep -iE 'HTTP/|location'
+
+  # 2) 跟随后应真的拿到 latest.yml（内容来自 COS）
+  curl -sL http://127.0.0.1:${PORT}/latest.yml | head -3
+
+  # 3) 安装包也要 302（-I 不下载，只跳转，很快）
+  curl -sI http://<公网IP>:${PORT}/RPA_Pilot-<版本>-setup.exe | grep -iE 'HTTP/|location'
+
+  # 4) 绕开服务器，直连 COS 测速度（用来确认桶权限是公有读）
+  curl -sI ${COS_ORIGIN}${COS_PATH_PREFIX}/latest.yml | head -1
+
+  # 5) 不该被访问到的路径仍然要 404
+  curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${PORT}/package.json
+
+注意：
+  · 客户端不需要重新打包 —— 302 会被 electron-updater 跟随（maxRedirects = 10），
+    更新源地址继续用这台机器的 ${PORT} 端口即可。
+  · 顺序由脚本保证：先传安装包和 blockmap，最后传 latest.yml，
+    避免客户端读到指向「还没传完的安装包」的版本清单。
+  · 客户端连不上 COS 时更新会失败。本机目录里仍然保留着完整产物，
+    应急时可以把 ${COS_CONF_FILE} 删掉并重跑本脚本（不带 COS_BUCKET），退回本机直供。
+
+COS 桶：${COS_BUCKET}（${COS_REGION}）  跳转配置：${COS_CONF_FILE}  coscli 配置：${COS_CLI_CONFIG}
+同步日志：${LOG_FILE}
+改端口/目录后重跑本脚本即可，它是幂等的。
+EOF
+else
 cat <<EOF
 日常就一条命令（没有装 cron，完全由你手动控制）：
 
@@ -420,6 +676,12 @@ cat <<EOF
 改端口/目录后重跑本脚本即可，它是幂等的。
 想让服务器每 15 分钟自动拉一次：sudo ENABLE_CRON=1 bash scripts/deploy-server.sh
 
+【重要】这台机器跨境带宽实测只有几 KB/s ~ 几百 KB/s，客户端下载 115 MB
+可能要几十分钟甚至几小时，且关掉应用就得从头再来。建议改用 COS：
+  COS_BUCKET=xxx COS_REGION=ap-guangzhou COS_SECRET_ID=xxx COS_SECRET_KEY=xxx \\
+    sudo -E bash scripts/deploy-server.sh
+
 注意：更新目录的写权限要保持只有 root 可写。
 不签名的话，谁能写这个目录，谁就能给所有客户端推任意代码。
 EOF
+fi
