@@ -203,6 +203,57 @@ elif [ "$NGINX_MANAGED_BY_SYSTEMD" = "0" ] && [ -n "$NGINX_RUNNING_PID" ]; then
     printf '\n'
 elif ! command -v nginx >/dev/null 2>&1; then
     warn "系统里没有 nginx，跳过。装好后重跑本脚本即可"
+elif [ "$NGINX_MANAGED_BY_SYSTEMD" = "0" ]; then
+    # 到这里说明：装了 nginx、systemd 有它的 unit，但当前没有 host nginx 在跑。
+    # 常见于「80 端口被 Docker 容器占着，宿主机 nginx 从没起来过」。
+    # 此时不能盲目 start —— 发行版默认站点里有 listen 80，一启动就会和 Docker 撞车。
+    BACKUP=""
+    if [ -f "$NGINX_CONF" ]; then
+        BACKUP="${NGINX_CONF}.bak.$(date +%Y%m%d%H%M%S)"
+        cp -a "$NGINX_CONF" "$BACKUP"
+        info "已备份原配置到 ${BACKUP}"
+    fi
+    render_server_block > "$NGINX_CONF"
+
+    if ! nginx -t >/dev/null 2>&1; then
+        printf '\n'
+        nginx -t || true
+        rm -f "$NGINX_CONF"
+        [ -n "$BACKUP" ] && cp -a "$BACKUP" "$NGINX_CONF"
+        die "Nginx 配置校验失败，已回滚。请检查上面的报错"
+    fi
+    ok "配置已写入 ${NGINX_CONF}（只监听 ${PORT}）"
+
+    # 关键检查：nginx 配置树里还有没有别的 listen 80？
+    # 有的话一启动就会撞上已经占用 80 的进程（很可能是 docker-proxy），
+    # 报 address already in use —— 所以我们先不启动，把解法给出来。
+    CONFLICT="$(grep -rn --include='*.conf' -E 'listen[[:space:]]+[^;]*\b80\b' /etc/nginx 2>/dev/null | head -5 || true)"
+
+    if [ -n "$CONFLICT" ]; then
+        printf '\n'
+        warn "Nginx 配置里还存在监听 80 的地方，现在启动会和已占用 80 的进程冲突："
+        printf '%s\n' "$CONFLICT" | sed 's/^/      /'
+        printf '\n'
+        info "80 现在被谁占着：$(ss -lntp 2>/dev/null | grep ':80 ' | head -1 || echo '（查不到）')"
+        printf '\n'
+        warn "【已跳过启动】。如果你希望宿主机 nginx 只服务 ${PORT} 端口，先去掉发行版默认站点："
+        info "  rm -f /etc/nginx/sites-enabled/default      # 它就是 listen 80 default_server 的来源"
+        info "  grep -rn 'listen.*80' /etc/nginx/           # 确认没有残留"
+        info "  systemctl enable --now nginx                # 此时只会占 ${PORT}，不碰 80"
+        info "然后重跑本脚本。"
+        printf '\n'
+        info "如果你不想用宿主机 nginx（例如 80 上的项目本来就在 Docker 里跑），"
+        info "那就跳过它，用别的办法在 ${PORT} 上提供静态文件即可 —— 配置已经写好了，不影响。"
+    else
+        if systemctl enable --now nginx 2>/dev/null; then
+            ok "已启动 nginx 并设为开机自启（只监听 ${PORT}）"
+        else
+            warn "启动失败，请手工执行：systemctl enable --now nginx"
+        fi
+    fi
+
+    # shellcheck disable=SC2012
+    ls -1t "${NGINX_CONF}".bak.* 2>/dev/null | tail -n +6 | while read -r f; do rm -f "$f"; done || true
 else
     BACKUP=""
     if [ -f "$NGINX_CONF" ]; then
