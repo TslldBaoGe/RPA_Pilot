@@ -279,6 +279,8 @@ const autoStartHint = computed(() => {
 </template>
 
 <style scoped>
+/* .page 就是整页唯一的滚动容器：内容超出时出现正常滚动条。
+   不再隐藏它 —— 用户要求「主体内容超了，该有大滚动条就该有」。 */
 .page {
   height: 100%;
   overflow-y: auto;
@@ -286,16 +288,11 @@ const autoStartHint = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  /* 隐藏滚动条本身（内容超出时滚轮照常能滚）：
-     这条竖条既占宽度又难看，而页面本来就是上下翻卡片，不需要靠它提示 */
-  scrollbar-width: none;
-  -ms-overflow-style: none;
 }
 
-.page::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-  display: none;
+/* 整页一个滚动容器：卡片随内容自然撑高，不被压缩出内部滚动条 */
+.page > * {
+  flex-shrink: 0;
 }
 
 .page-header {

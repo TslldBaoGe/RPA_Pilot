@@ -27,17 +27,5 @@ code,
   user-select: text;
 }
 
-/* 全局隐藏滚动条：内容超出时仍可用滚轮 / 触控板滚动。
-   原先只在「运行环境 / 设置」两页的 .page 上隐藏，实际仍能看到滚动条 ——
-   真正的滚动容器不一定是页面本身（可能是 el-main、el-scrollbar 的内部容器或窗口），
-   所以统一在全局处理，避免再有漏网的。
-   用 !important 是为了压过 Element Plus 自带的滚动条样式（如 el-scrollbar__wrap）。 */
-* {
-  scrollbar-width: none;
-}
-
-*::-webkit-scrollbar {
-  width: 0 !important;
-  height: 0 !important;
-  display: none !important;
-}
+/* 主体内容超出时出现正常滚动条（滚动容器就是 .page，见各视图）。
+   对话框 / 抽屉内部自己的小滚动区保持不变 —— 那是浮层，本来就该独立滚。 */

@@ -286,7 +286,7 @@ const stats = computed(() => ({
     </el-row>
 
     <el-card shadow="never" class="table-card">
-      <el-table v-if="tasks.length > 0" :data="tasks" size="small" height="100%">
+      <el-table v-if="tasks.length > 0" :data="tasks" size="small">
         <el-table-column label="状态" width="92">
           <template #default="{ row }">
             <el-tag :type="rowStatus(row).type" size="small" effect="plain">
@@ -382,11 +382,16 @@ const stats = computed(() => ({
 <style scoped>
 .page {
   height: 100%;
-  overflow: hidden;
+  overflow-y: auto;
   padding: 20px 24px 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* 整页一个滚动容器：内容超出时由 .page 滚动，卡片自己不再内部滚动 */
+.page > * {
+  flex-shrink: 0;
 }
 
 .page-header {
@@ -439,15 +444,10 @@ const stats = computed(() => ({
 }
 
 .table-card {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+  /* 不再 flex:1 撑满剩余高度 —— 表格随内容自然撑高，由 .page 统一滚动 */
 }
 
 .table-card :deep(.el-card__body) {
-  flex: 1;
-  min-height: 0;
   padding: 0;
 }
 
