@@ -59,8 +59,14 @@ fi
 # 分片（多连接）下载的并发数。跨境 / 代理链路上单连接被限得很死，
 # 多开并发基本线性提速 —— 实测同一条镜像链路下载 10 MB：
 #   1 条 86s(121KB/s) / 4 条 33s(319KB/s) / 8 条 18s(576KB/s) / 16 条 10s(1036KB/s) / 32 条 7s(1433KB/s)
-# 取 16 作为默认（约 1 MB/s，120 MB 从十几分钟降到约 2 分钟）；设 DL_JOBS=1 可关掉分片。
-DL_JOBS="${DL_JOBS:-16}"
+# 取 32 作为默认（约 1.4 MB/s，120 MB 约 1.5 分钟）；收益随并发数趋平，再往上意义不大；
+# 设 DL_JOBS=1 可关掉分片。
+DL_JOBS="${DL_JOBS:-32}"
+
+# 多个加速镜像候选：实际同步前用 2 MB 探测块给每个镜像测速，选最快的一个用。
+# 镜像单点故障 / 被限流时这是最有效的兜底 —— 别指望某一个镜像永远好用。
+# 全部镜像都不通时才退回直连 GitHub。
+GH_MIRRORS="${GH_MIRRORS:-https://gh-proxy.com https://ghfast.top https://ghproxy.net https://github.moeyy.xyz}"
 
 FORCE=0
 CHECK_ONLY=0
@@ -141,6 +147,52 @@ supports_range() {
     [ "$code" = "206" ]
 }
 
+# 用 2 MB 探测块实测一个镜像的下载速度（KB/s）。测不出（超时/不支持 Range）返回 0。
+# mirror 为空串表示直连。镜像地址拼接遵循 gh-proxy 约定：<镜像>/<原始https地址>。
+mirror_speed() {
+    local mirror="$1" path="$2" url start end bytes
+    if [ -n "$mirror" ]; then
+        url="${mirror%/}/${path}"
+    else
+        url="$path"
+    fi
+    start=$(date +%s%N)
+    bytes="$(curl -s -r 0-2097151 --connect-timeout 8 --max-time 20 -o /dev/null -w '%{size_download}' "$url" 2>/dev/null || echo 0)"
+    end=$(date +%s%N)
+    case "$bytes" in ''|*[!0-9]*) bytes=0 ;; esac
+    [ "$bytes" -gt 0 ] || { echo 0; return; }
+    awk -v b="$bytes" -v ns=$((end - start)) 'BEGIN { printf "%d", b * 1000000000 / ns / 1024 }'
+}
+
+# 从 GH_MIRRORS 里挑最快的镜像，写进 GH_PROXY（全部不可用则清空 → 退回直连）。
+# 显式配了 GH_PROXY（单个镜像）时尊重它，不再测速。
+pick_fastest_mirror() {
+    [ -n "$GH_PROXY" ] && return
+    local best="" best_speed=0 m speed direct_speed
+    for m in $GH_MIRRORS; do
+        speed="$(mirror_speed "$m" "$RELEASE_BASE/$PACKAGE")"
+        info "  测速 ${m}：${speed} KB/s"
+        if [ "$speed" -gt "$best_speed" ]; then
+            best="$m"; best_speed="$speed"
+        fi
+    done
+    # 镜像全都不可用（或被限到接近 0）时，和直连比一次再定
+    if [ "$best_speed" -le 10 ]; then
+        direct_speed="$(mirror_speed "" "$RELEASE_BASE/$PACKAGE")"
+        info "  测速 直连 GitHub：${direct_speed} KB/s"
+        if [ "$direct_speed" -gt "$best_speed" ]; then
+            info "镜像全不可用，改用直连 GitHub"
+            return
+        fi
+    fi
+    if [ -n "$best" ]; then
+        GH_PROXY="$best"
+        info "选用最快镜像：${best}（${best_speed} KB/s）"
+    else
+        info "没有可用镜像，退回直连 GitHub"
+    fi
+}
+
 # 多连接分片下载。
 # 为什么要它：跨境 / 代理链路上单连接常被限速（实测单流约 400 KB/s，120 MB 要 5 分钟），
 # 多开几条并发连接通常能把总带宽吃回来。
@@ -170,7 +222,8 @@ download_segments() {
     done
     [ "${#pids[@]}" -gt 0 ] || { rm -rf "$dir"; return 1; }
 
-    # 终端下给一条聚合进度；非终端则安静等待
+    # 终端下用 \r 原地刷新聚合进度；非终端（cron 进日志）每 10% 写一行日志，
+    # 这样看日志文件也能知道下载在推进，而不是卡在一条「下载中」上。
     if [ "${#CURL_PROGRESS[@]}" -gt 0 ]; then
         local got alive f p
         while :; do
@@ -184,6 +237,23 @@ download_segments() {
             sleep 1
         done
         printf '\n'
+    else
+        local got last_pct=-10 alive f p
+        while :; do
+            got=0; alive=0
+            for f in "$dir"/part.*; do
+                [ -f "$f" ] && got=$(( got + $(stat -c %s "$f" 2>/dev/null || echo 0) ))
+            done
+            local pct=$(( got * 100 / size ))
+            # 每跨过一个 10% 的坎记一次；日志里能看出来在动就行，不用每 1% 刷屏
+            if [ "$pct" -ge $(( last_pct + 10 )) ]; then
+                info "  下载进度 ${pct}%（$(human "$got") / $(human "$size")）"
+                last_pct=$(( pct / 10 * 10 ))
+            fi
+            for p in "${pids[@]}"; do kill -0 "$p" 2>/dev/null && alive=1; done
+            [ "$alive" = "0" ] && break
+            sleep 2
+        done
     fi
 
     local failed=0 p
@@ -349,6 +419,12 @@ fi
 # --speed-limit/--speed-time 进一步防「连上了但传输停滞」。
 # 安装包大小取自 latest.yml，用来做多连接分片；没有就退回单流。
 PKG_SIZE="$(read_pkg_size "${TMP_DIR}/latest.yml")"
+
+# 下载前给候选镜像测速，选最快的一个（显式配了 GH_PROXY 则跳过测速）。
+# 这一步把「某个镜像被限流/故障导致同步龟速」从排查题变成自动绕行。
+info "挑选最快的下载镜像…"
+pick_fastest_mirror
+
 download_asset "${PACKAGE}" "${TMP_DIR}/${PACKAGE}" 1800 "$PKG_SIZE" \
     || die "下载安装包失败：${RELEASE_BASE}/${PACKAGE}"
 
