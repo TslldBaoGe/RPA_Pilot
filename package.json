@@ -1,6 +1,6 @@
 {
   "name": "rpa-pilot",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "description": "本地 Python 任务管理客户端（Electron + Vue3）",
   "author": "RPA_Pilot Team",
