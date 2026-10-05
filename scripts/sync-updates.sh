@@ -191,7 +191,16 @@ if [ "$KEEP" -gt 0 ]; then
 fi
 
 if [ -n "$OWNER" ]; then
-    chown -R "${OWNER}" "${TARGET_DIR}" 2>/dev/null || warn "chown ${OWNER} 失败（可能需要 root）"
+    # 只改本脚本写入的那几个文件，**不要** chown -R 整个目录：
+    # 更新目录里可能还放着别的东西（比如克隆下来的仓库），
+    # 递归改属主会把它们一起改掉，是个很隐蔽的坑。
+    for f in latest.yml "${PACKAGE}" "${BLOCKMAP}"; do
+        target="${TARGET_DIR}/${f}"
+        if [ -e "$target" ]; then
+            chmod 0644 "$target" 2>/dev/null || true
+            chown "${OWNER}" "$target" 2>/dev/null || warn "chown ${OWNER} ${f} 失败（可能需要 root）"
+        fi
+    done
 fi
 
 # ── 6) 汇总 ─────────────────────────────────────────────
