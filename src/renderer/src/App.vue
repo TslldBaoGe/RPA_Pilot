@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import type { AppInfo, UpdateState } from '@shared/types'
+import logoUrl from './assets/logo.png'
 
 const route = useRoute()
 const info = ref<AppInfo | null>(null)
@@ -44,7 +45,7 @@ const updateBadge = computed(() => {
   <el-container class="shell">
     <el-aside width="196px" class="aside">
       <div class="brand">
-        <span class="brand-dot" />
+        <img :src="logoUrl" class="brand-logo" alt="RPA_Pilot" />
         <span class="brand-name">RPA_Pilot</span>
       </div>
 
@@ -98,11 +99,12 @@ const updateBadge = computed(() => {
   padding: 0 18px 16px;
 }
 
-.brand-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #406cff;
+.brand-logo {
+  /* 和 app 图标同一枚图（由 scripts/make-icons.py 一并输出到这里） */
+  width: 26px;
+  height: 26px;
+  display: block;
+  border-radius: 7px;
 }
 
 .brand-name {

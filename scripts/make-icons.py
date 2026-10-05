@@ -171,6 +171,13 @@ def main() -> None:
     write_ico(os.path.join(OUT_DIR, 'icon.ico'), app_images)
     app_images[256].save(os.path.join(OUT_DIR, 'icon.png'), 'PNG', optimize=True)
 
+    # 应用内左上角那个小 logo 也用同一枚图。
+    # 让脚本顺便输出一份到渲染层，避免两处各存一份、以后改了这头忘了那头。
+    assets_dir = os.path.join(os.path.dirname(OUT_DIR), 'src', 'renderer', 'src', 'assets')
+    os.makedirs(assets_dir, exist_ok=True)
+    make_icon(128).save(os.path.join(assets_dir, 'logo.png'), 'PNG', optimize=True)
+    print('  logo.png      (renderer assets)')
+
     tray_sizes = [16, 20, 24, 32]
     write_ico(os.path.join(OUT_DIR, 'tray.ico'), {s: make_icon(s) for s in tray_sizes}, png_sizes=())
     make_icon(32).save(os.path.join(OUT_DIR, 'tray.png'), 'PNG', optimize=True)
