@@ -11,7 +11,7 @@
 #   2. 装拉取脚本到 /usr/local/bin
 #   3. 在指定端口上提供 HTTP 服务（默认用独立 Docker 容器，**不碰宿主机 nginx**）
 #   4. 放行端口（自动识别 firewalld / ufw）
-#   5. 注册 cron（已存在则更新，不重复添加）
+#   5. 生成便捷命令 rpa-sync（默认不装 cron，由你手动执行）
 #   6. 跑一次 --check 验证能连上 GitHub
 #
 # 可用环境变量覆盖默认值：
@@ -19,8 +19,10 @@
 #   SERVE_MODE=docker|nginx|none|auto   默认 auto（有 docker 就用容器）
 #   CONTAINER_NAME=rpa-pilot-updates IMAGE=nginx:alpine
 #   WEB_USER=nginx LOG_FILE=/var/log/rpa-pilot-sync.log
+#   WRAPPER_PATH=/usr/local/bin/rpa-sync   便捷命令的位置
+#   ENABLE_CRON=1                        想让服务器每 15 分钟自动拉时才需要
 #   NGINX_START=1                        仅在 SERVE_MODE=nginx 时用于「启动宿主机 nginx」
-#   SKIP_FIREWALL=1 SKIP_CRON=1 SKIP_CHECK=1 NGINX_MODE=skip
+#   SKIP_FIREWALL=1 SKIP_CHECK=1 NGINX_MODE=skip
 #
 set -euo pipefail
 
@@ -32,7 +34,10 @@ KEEP="${KEEP:-3}"
 LOG_FILE="${LOG_FILE:-/var/log/rpa-pilot-sync.log}"
 NGINX_CONF="${NGINX_CONF:-/etc/nginx/conf.d/rpa-pilot.conf}"
 BIN_PATH="${BIN_PATH:-/usr/local/bin/sync-updates.sh}"
+WRAPPER_PATH="${WRAPPER_PATH:-/usr/local/bin/rpa-sync}"
 CRON_SCHEDULE="${CRON_SCHEDULE:-*/15 * * * *}"
+# 默认不装 cron，改由人工执行 rpa-sync；要定时自动拉就设 ENABLE_CRON=1
+ENABLE_CRON="${ENABLE_CRON:-0}"
 
 # 默认用独立容器提供服务：和宿主机上已有的站点（尤其是别人的 Docker 容器）完全隔离。
 # 很多机器上 80 端口属于另一个项目，动宿主机 nginx 容易把别人的站搞挂。
@@ -113,6 +118,25 @@ install -m 0755 "$SYNC_SRC" "$BIN_PATH"
 ok "${BIN_PATH}"
 bash -n "$BIN_PATH" || die "拉取脚本语法检查失败"
 ok "语法检查通过"
+
+# 再放一个「包装命令」，把仓库地址、更新目录、属主都固定进去。
+# 这样手动同步只要敲 rpa-sync 就行，不用每次记一堆参数 ——
+# 而且能避免一个坑：sync-updates.sh 自己的默认目录是 /var/www/rpa-pilot，
+# 不带参数直接跑会同步到错的地方。
+cat > "$WRAPPER_PATH" <<EOF
+#!/usr/bin/env bash
+# 由 scripts/deploy-server.sh 生成。拉取最新更新包到更新目录。
+# 用法：sudo rpa-sync            （同步到最新版）
+#       sudo rpa-sync --check    （只看远端是什么版本，不下载）
+#       sudo rpa-sync --force    （版本相同也重下，用于修复损坏的产物）
+exec ${BIN_PATH} \\
+  --target '${TARGET_DIR}' \\
+  --owner '${WEB_USER}' \\
+  --keep '${KEEP}' \\
+  "\$@"
+EOF
+chmod 0755 "$WRAPPER_PATH"
+ok "已生成便捷命令 ${WRAPPER_PATH}"
 
 # ── 3) 提供 HTTP 服务 ───────────────────────────────────
 step "3/6 提供 HTTP 服务（端口 ${PORT}）"
@@ -322,11 +346,11 @@ else
 fi
 warn "别忘了云厂商的安全组！腾讯云控制台 → 安全组 → 放行 ${PORT} 入站，否则本机 curl 通、外面连不上"
 
-# ── 5) cron ─────────────────────────────────────────────
-step "5/6 注册 cron（${CRON_SCHEDULE}）"
-if [ "$SKIP_CRON" = "1" ]; then
-    warn "SKIP_CRON=1，跳过"
-else
+# ── 5) 自动拉取（cron）──────────────────────────────────
+# 默认【不装 cron】：由你自己手动执行 rpa-sync 拉取即可。
+# 想要定时自动拉，加 ENABLE_CRON=1 重跑本脚本。
+step "5/6 自动拉取"
+if [ "$ENABLE_CRON" = "1" ]; then
     CRON_LINE="${CRON_SCHEDULE} REPO=${REPO} TARGET_DIR=${TARGET_DIR} KEEP=${KEEP} OWNER=${WEB_USER} LOG_FILE=${LOG_FILE} ${BIN_PATH}"
     EXISTING="$(crontab -l 2>/dev/null || true)"
 
@@ -335,13 +359,31 @@ else
         printf '%s\n' "$CRON_LINE" >> /tmp/.rpa-cron.$$
         crontab /tmp/.rpa-cron.$$
         rm -f /tmp/.rpa-cron.$$
-        ok "已更新已有的 cron 条目"
+        ok "已更新已有的 cron 条目（${CRON_SCHEDULE}）"
     else
         { printf '%s\n' "$EXISTING"; printf '%s\n' "$CRON_LINE"; } | grep -v '^$' | crontab -
-        ok "已添加 cron 条目"
+        ok "已添加 cron 条目（${CRON_SCHEDULE}）"
     fi
     info "当前 crontab："
     crontab -l 2>/dev/null | sed 's/^/      /'
+else
+    # 默认行为：把本脚本以前装的那条 cron 清掉，避免它继续偷偷在后台跑
+    EXISTING="$(crontab -l 2>/dev/null || true)"
+    if printf '%s\n' "$EXISTING" | grep -Fq "${BIN_PATH}"; then
+        printf '%s\n' "$EXISTING" | grep -Fv "${BIN_PATH}" | grep -v '^$' > /tmp/.rpa-cron.$$ || true
+        if [ -s /tmp/.rpa-cron.$$ ]; then
+            crontab /tmp/.rpa-cron.$$
+        else
+            crontab -r 2>/dev/null || true
+        fi
+        rm -f /tmp/.rpa-cron.$$
+        ok "已移除之前装的 cron 条目（改由你手动执行）"
+    else
+        info "没有装 cron（按你的要求：手动执行）"
+    fi
+    info "以后拉最新更新包，执行这一条："
+    info "  sudo ${WRAPPER_PATH}"
+    info "（想看历史日志：tail -f ${LOG_FILE}）"
 fi
 
 # ── 6) 连通性验证 ───────────────────────────────────────
@@ -359,23 +401,25 @@ fi
 # ── 汇总 ────────────────────────────────────────────────
 printf '\n\033[1;32m部署完成\033[0m\n\n'
 cat <<EOF
-接下来：
+日常就一条命令（没有装 cron，完全由你手动控制）：
 
-  1) 立刻同步一次（约 115 MB）
-       sudo ${BIN_PATH} --target ${TARGET_DIR}
+  拉取最新更新包：   sudo ${WRAPPER_PATH}
+  只看远端版本：     sudo ${WRAPPER_PATH} --check
+  强制重下：         sudo ${WRAPPER_PATH} --force
 
-  2) 验证
-       curl -I http://127.0.0.1:${PORT}/latest.yml      # 应 200
-       curl -I http://127.0.0.1:${PORT}/package.json    # 应 404
-       curl -I http://<公网IP>:${PORT}/latest.yml        # 外面也要通（安全组）
+验证：
+  curl -I http://127.0.0.1:${PORT}/latest.yml      # 应 200
+  curl -I http://127.0.0.1:${PORT}/package.json    # 应 404
+  curl -I http://<公网IP>:${PORT}/latest.yml        # 外面也要通（安全组）
 
-  3) 检查服务器上的安装包与 latest.yml 声明的 sha512 是否一致
-       cd ${TARGET_DIR}
-       grep -m1 '^sha512:' latest.yml
-       sha512sum RPA_Pilot-*-setup.exe | awk '{print \$1}' | xxd -r -p | base64 -w0; echo
+检查服务器上的安装包与 latest.yml 声明的 sha512 是否一致：
+  cd ${TARGET_DIR}
+  grep -m1 '^sha512:' latest.yml
+  sha512sum RPA_Pilot-*-setup.exe | awk '{print \$1}' | xxd -r -p | base64 -w0; echo
 
-  同步日志：${LOG_FILE}
-  改端口/目录后重跑本脚本即可，它是幂等的。
+同步日志：${LOG_FILE}
+改端口/目录后重跑本脚本即可，它是幂等的。
+想让服务器每 15 分钟自动拉一次：sudo ENABLE_CRON=1 bash scripts/deploy-server.sh
 
 注意：更新目录的写权限要保持只有 root 可写。
 不签名的话，谁能写这个目录，谁就能给所有客户端推任意代码。
