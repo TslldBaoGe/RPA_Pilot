@@ -60,6 +60,9 @@ let periodicTimer: NodeJS.Timeout | null = null
 let checkInFlight = false
 /** 上次生效的配置，用于判断「自动检查」开关是否被改动 */
 let lastConfig: UpdaterConfig | null = null
+/** 下载进度日志用的：上次记到哪个 10% 档位、上次已传多少字节 */
+let lastLoggedPercent = -1
+let lastTransferred = 0
 
 /** 自动检查的间隔：4 小时 */
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
@@ -224,6 +227,27 @@ function wireEvents(): void {
     bytesPerSecond = progress.bytesPerSecond
     message = null
     emit()
+
+    // 每 10% 记一条，把「实际速度」和「有没有倒退」都留在日志里。
+    // 之前没有这个日志，用户看到进度条从 83 MB 退回 3 MB 时完全查不出原因。
+    const bucket = Math.floor(progress.percent / 10) * 10
+    if (bucket > lastLoggedPercent) {
+      lastLoggedPercent = bucket
+      const mb = (n: number): string => `${(n / 1024 / 1024).toFixed(1)}MB`
+      log(
+        `下载进度 ${bucket}%  已传 ${mb(progress.transferred)} / ${mb(progress.total)}` +
+          `  速度 ${(progress.bytesPerSecond / 1024).toFixed(0)} KB/s`
+      )
+    }
+    // 进度倒退 = 下载重新开始了，单独记一条（这是排查同类问题的关键线索）
+    if (progress.transferred < lastTransferred - 1024 * 1024) {
+      log(
+        `⚠ 下载进度倒退：${(lastTransferred / 1024 / 1024).toFixed(1)}MB → ` +
+          `${(progress.transferred / 1024 / 1024).toFixed(1)}MB（下载重新开始了）`
+      )
+      lastLoggedPercent = -1
+    }
+    lastTransferred = progress.transferred
   })
 
   autoUpdater.on('update-downloaded', (info) => {
@@ -281,6 +305,9 @@ export async function downloadUpdate(): Promise<UpdateState> {
 
   try {
     log('开始下载更新包')
+    // 重置进度日志状态，让本次下载从 0% 开始记
+    lastLoggedPercent = -1
+    lastTransferred = 0
     setPhase('downloading')
     await autoUpdater.downloadUpdate()
   } catch (err) {
@@ -365,6 +392,35 @@ export function initUpdater(d: UpdaterDeps): void {
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.allowPrerelease = false
+
+  // 关掉差量下载（实测踩到的坑）。
+  //
+  // 差量下载的原理：只下载变化的分块，未变的分块从本地旧安装包复制过来。
+  // 听起来划算，但在「高延迟 + 小带宽」的链路上是负收益：
+  //   1. 它会发大量小的 HTTP Range 请求，每个都要等一个完整往返。
+  //      实测到更新服务器的 RTT 是 155 ms，客户端只有约 78 KB/s；
+  //      而同一时刻单流整包下载能到约 580 KB/s（慢 7 倍）。
+  //   2. 更糟的是它会失败并静默重来：实测下到 83 MB 后从 3 MB 重新开始，
+  //      而 electron-updater 不抛 error 事件 —— 用户在界面上只看到进度条倒退。
+  //      对业务同事来说「点了更新等半小时还倒退」比「多下点流量」糟糕得多。
+  //   3. 本次更新的差异本来就大（改了 exe 图标，NSIS 压缩包会级联变化），
+  //      差量并没省下多少。
+  //
+  // 改回单流整包下载后：一次请求连续传输，能吃满服务器带宽。
+  // 代价是每次都下完整安装包。以后更新源若换到带宽充足的 COS/CDN，
+  // 可以把这行改回 false 重新评估 —— 那时差量才真正划算。
+  autoUpdater.disableDifferentialDownload = true
+
+  // 把 electron-updater 的内部日志接到我们自己的 update.log。
+  // 不接的话它的失败是完全静默的 —— 上面那个「下载重启」就是因为没日志才难查。
+  autoUpdater.logger = {
+    info: (message?: unknown) => log(`[updater] ${String(message ?? '')}`),
+    warn: (message?: unknown) => log(`[updater:warn] ${String(message ?? '')}`),
+    error: (message?: unknown) => log(`[updater:error] ${String(message ?? '')}`),
+    debug: () => {
+      // 内部调试消息太吵，丢掉
+    }
+  } as unknown as typeof autoUpdater.logger
 
   wireEvents()
   applyFeedUrl()
