@@ -1,0 +1,19 @@
+# 统一换行符，避免跨平台踩坑
+#
+# 最重要的一条是 *.sh：如果 shell 脚本被签出成 CRLF，
+# Linux 上会直接报 `bash: $'\r': command not found`，而且报错信息完全看不出原因。
+* text=auto eol=lf
+
+# Shell 脚本必须是 LF
+*.sh text eol=lf
+
+# Windows 脚本保持 CRLF（PowerShell / 批处理习惯如此）
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件不要做任何换行转换
+*.ico binary
+*.png binary
+*.exe binary
+*.node binary
