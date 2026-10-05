@@ -131,21 +131,11 @@ ok "语法检查通过"
 
 # ── 3) Nginx 配置 ───────────────────────────────────────
 step "3/6 配置 Nginx"
-if [ "$SKIP_NGINX" = "1" ]; then
-    warn "SKIP_NGINX=1，跳过"
-elif ! command -v nginx >/dev/null 2>&1; then
-    warn "系统里没有 nginx，跳过。装好后重跑本脚本即可"
-else
-    BACKUP=""
-    if [ -f "$NGINX_CONF" ]; then
-        BACKUP="${NGINX_CONF}.bak.$(date +%Y%m%d%H%M%S)"
-        cp -a "$NGINX_CONF" "$BACKUP"
-        info "已备份原配置到 ${BACKUP}"
-    fi
 
-    # 只放行更新产物，其余一律 404。
-    # 这样即使更新目录和仓库源码是同一个目录，也不会把源码 / .git / package.json 暴露到公网。
-    cat > "$NGINX_CONF" <<EOF
+# 生成 server 块：只放行更新产物，其余一律 404。
+# 这样即使更新目录里同时放着别的东西（源码 / .git / package.json），也不会暴露到公网。
+render_server_block() {
+    cat <<EOF
 # 由 scripts/deploy-server.sh 生成，请勿手工修改（会被覆盖）
 server {
     listen ${PORT};
@@ -167,6 +157,61 @@ server {
     }
 }
 EOF
+}
+
+# 探测 nginx 到底是谁在管 —— 这一步非常关键，写错会弄坏用户已有的站点：
+#   情况 A：nginx 由 systemd 管 → 写 /etc/nginx/conf.d/ 然后 systemctl reload
+#   情况 B：nginx 由宝塔面板 / 1Panel / Docker / 手工启动 → systemctl 管不到它，
+#          而且它的配置目录也不是 /etc/nginx/conf.d。盲写文件不会生效，
+#          还可能让「多余的第二个 nginx」启动失败（就是 80 端口冲突那个报错）。
+NGINX_MANAGED_BY_SYSTEMD=0
+NGINX_RUNNING_PID=""
+NGINX_RUNNING_BIN=""
+
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then
+    NGINX_MANAGED_BY_SYSTEMD=1
+fi
+
+if [ "$NGINX_MANAGED_BY_SYSTEMD" = "0" ] && command -v pgrep >/dev/null 2>&1; then
+    NGINX_RUNNING_PID="$(pgrep -f 'nginx: master process' 2>/dev/null | head -1 || true)"
+    [ -n "$NGINX_RUNNING_PID" ] || NGINX_RUNNING_PID="$(pgrep -x nginx 2>/dev/null | head -1 || true)"
+    if [ -n "$NGINX_RUNNING_PID" ]; then
+        NGINX_RUNNING_BIN="$(readlink -f "/proc/${NGINX_RUNNING_PID}/exe" 2>/dev/null || true)"
+    fi
+fi
+
+if [ "$SKIP_NGINX" = "1" ]; then
+    warn "SKIP_NGINX=1，跳过"
+elif [ "$NGINX_MANAGED_BY_SYSTEMD" = "0" ] && [ -n "$NGINX_RUNNING_PID" ]; then
+    printf '\n'
+    warn "检测到一个正在运行的 nginx，但它不归 systemd 管："
+    info "  PID    : ${NGINX_RUNNING_PID}"
+    info "  二进制 : ${NGINX_RUNNING_BIN:-（读不到，可能是容器内的进程）}"
+    info "  systemd: $(systemctl is-active nginx 2>/dev/null || echo unknown)"
+    printf '\n'
+    warn "所以 /etc/nginx/conf.d/ 多半不是它的配置目录，systemctl reload nginx 也管不到它。"
+    warn "【已主动跳过 Nginx 配置】—— 盲写文件不会生效，还可能弄坏你现有的站点。"
+    printf '\n'
+    info "请手工把下面这段加到那个 nginx 的配置里。先确认它的配置目录："
+    info "  ${NGINX_RUNNING_BIN:-nginx} -V 2>&1 | tr ' ' '\\n' | grep -E 'conf-path|prefix'"
+    info "宝塔面板通常是 /www/server/panel/vhost/nginx/*.conf；1Panel 在 /opt/1panel/... 下"
+    printf '\n'
+    render_server_block | sed 's/^/      /'
+    printf '\n'
+    info "加完用【同一个二进制】校验并重载（不要用 systemctl）："
+    info "  ${NGINX_RUNNING_BIN:-nginx} -t && ${NGINX_RUNNING_BIN:-nginx} -s reload"
+    printf '\n'
+elif ! command -v nginx >/dev/null 2>&1; then
+    warn "系统里没有 nginx，跳过。装好后重跑本脚本即可"
+else
+    BACKUP=""
+    if [ -f "$NGINX_CONF" ]; then
+        BACKUP="${NGINX_CONF}.bak.$(date +%Y%m%d%H%M%S)"
+        cp -a "$NGINX_CONF" "$BACKUP"
+        info "已备份原配置到 ${BACKUP}"
+    fi
+
+    render_server_block > "$NGINX_CONF"
 
     if ! nginx -t >/dev/null 2>&1; then
         printf '\n'
@@ -182,10 +227,10 @@ EOF
 
     if systemctl reload nginx 2>/dev/null; then
         ok "已 reload nginx"
-    elif nginx -s reload 2>/dev/null; then
+    elif command -v nginx >/dev/null 2>&1 && nginx -s reload 2>/dev/null; then
         ok "已 reload nginx（nginx -s reload）"
     else
-        warn "reload 失败，请手工执行：systemctl reload nginx"
+        warn "reload 失败，请手工执行：systemctl reload nginx 或 nginx -s reload"
     fi
 
     # 备份太多也没意义，只留最近 5 份
