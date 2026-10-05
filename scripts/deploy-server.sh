@@ -61,6 +61,10 @@ SKIP_NGINX="${SKIP_NGINX:-0}"
 SKIP_FIREWALL="${SKIP_FIREWALL:-0}"
 SKIP_CRON="${SKIP_CRON:-0}"
 SKIP_CHECK="${SKIP_CHECK:-0}"
+# 默认【不启动、不修改】宿主机 nginx。
+# 很多机器上 80 端口属于另一个项目（常见是跑在 Docker 里），
+# 随意 enable/start 宿主机 nginx 会和它抢端口。需要时显式设 1。
+NGINX_START="${NGINX_START:-0}"
 
 # ── 输出 ────────────────────────────────────────────────
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
@@ -231,24 +235,45 @@ elif [ "$NGINX_MANAGED_BY_SYSTEMD" = "0" ]; then
 
     if [ -n "$CONFLICT" ]; then
         printf '\n'
-        warn "Nginx 配置里还存在监听 80 的地方，现在启动会和已占用 80 的进程冲突："
+        warn "Nginx 配置里还存在监听 80 的地方，启动它必然和已占用 80 的进程冲突："
         printf '%s\n' "$CONFLICT" | sed 's/^/      /'
         printf '\n'
         info "80 现在被谁占着：$(ss -lntp 2>/dev/null | grep ':80 ' | head -1 || echo '（查不到）')"
-        printf '\n'
-        warn "【已跳过启动】。如果你希望宿主机 nginx 只服务 ${PORT} 端口，先去掉发行版默认站点："
-        info "  rm -f /etc/nginx/sites-enabled/default      # 它就是 listen 80 default_server 的来源"
-        info "  grep -rn 'listen.*80' /etc/nginx/           # 确认没有残留"
-        info "  systemctl enable --now nginx                # 此时只会占 ${PORT}，不碰 80"
-        info "然后重跑本脚本。"
-        printf '\n'
-        info "如果你不想用宿主机 nginx（例如 80 上的项目本来就在 Docker 里跑），"
-        info "那就跳过它，用别的办法在 ${PORT} 上提供静态文件即可 —— 配置已经写好了，不影响。"
-    else
+    fi
+
+    # 默认**不启动、不修改任何 nginx**。
+    # 很多机器上 80 端口属于另一个项目（常见是跑在 Docker 里），
+    # 随意 enable/start 宿主机 nginx 会和它抢端口，或者让用户以为网站出问题了。
+    # 只有显式 NGINX_START=1 才去启动。
+    if [ "$NGINX_START" = "1" ] && [ -z "$CONFLICT" ]; then
         if systemctl enable --now nginx 2>/dev/null; then
             ok "已启动 nginx 并设为开机自启（只监听 ${PORT}）"
         else
             warn "启动失败，请手工执行：systemctl enable --now nginx"
+        fi
+    else
+        printf '\n'
+        info "【没有动你的 nginx】配置已写入 ${NGINX_CONF}（只监听 ${PORT}），但没有启动它。"
+        printf '\n'
+        info "如果 80 端口上的站点属于别的项目（尤其是跑在 Docker 里的），推荐用独立容器喂 ${PORT}，"
+        info "这样和现有网站完全隔离、互不影响："
+        printf '\n'
+        cat <<DOCKER | sed 's/^/      /'
+docker run -d --name rpa-pilot-updates --restart unless-stopped \
+  -p PORT_MAP \
+  -v TARGET_MAP:/usr/share/nginx/html:ro \
+  nginx:alpine
+DOCKER
+        printf '\n'
+        info "（把 PORT_MAP 换成 ${PORT}:80，TARGET_MAP 换成 ${TARGET_DIR}）"
+        printf '\n'
+        info "或者，如果你确认宿主机 nginx 就是给这个更新服务用的、不会和 80 上的项目冲突，"
+        info "可以重新跑本脚本并加上 NGINX_START=1："
+        info "  sudo NGINX_START=1 bash scripts/deploy-server.sh"
+        if [ -n "$CONFLICT" ]; then
+            printf '\n'
+            warn "但上面那个 listen 80 的冲突必须先解决（去掉发行版默认站点）："
+            info "  rm -f /etc/nginx/sites-enabled/default"
         fi
     fi
 
