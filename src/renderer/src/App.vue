@@ -68,7 +68,6 @@ const updateBadge = computed(() => {
             {{ info.isDev ? '开发' : '生产' }}
           </el-tag>
         </div>
-        <div class="meta-hint">Electron {{ info?.versions.electron ?? '—' }}</div>
       </div>
     </el-aside>
 
@@ -125,12 +124,6 @@ const updateBadge = computed(() => {
 .meta-line {
   display: flex;
   gap: 6px;
-}
-
-.meta-hint {
-  margin-top: 8px;
-  font-size: 11.5px;
-  color: #a8b0bd;
 }
 
 .update-tip {
