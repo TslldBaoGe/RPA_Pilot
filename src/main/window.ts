@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { BrowserWindow, shell } from 'electron'
+import { resolveWindowIcon } from './icon'
 import { state } from './state'
 
 export interface WindowOptions {
@@ -9,6 +10,7 @@ export interface WindowOptions {
 
 export function createMainWindow(options: WindowOptions = {}): BrowserWindow {
   const shouldShow = options.show ?? true
+  const icon = resolveWindowIcon()
 
   const win = new BrowserWindow({
     width: 1180,
@@ -17,6 +19,8 @@ export function createMainWindow(options: WindowOptions = {}): BrowserWindow {
     minHeight: 640,
     show: false,
     title: 'RPA_Pilot',
+    // 不设的话任务栏会是 Electron 默认的原子图标
+    ...(icon ? { icon } : {}),
     autoHideMenuBar: true,
     backgroundColor: '#f5f7fa',
     webPreferences: {

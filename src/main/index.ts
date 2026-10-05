@@ -15,6 +15,7 @@ import { registerIpc } from './ipc'
 import { runSelfTest } from './selftest'
 import { state } from './state'
 import { createTray } from './tray'
+import { describeIconResolution } from './icon'
 import { disposeUpdater } from './updater'
 import { createMainWindow } from './window'
 
@@ -208,8 +209,9 @@ async function bootstrap(): Promise<void> {
 
   mainWindow = createMainWindow({ show: !startHidden })
   bootLog('主窗口已创建')
+  bootLog(`图标解析：${describeIconResolution()}`)
 
-  tray = createTray({ paths, getWindow: () => mainWindow })
+  tray = createTray({ getWindow: () => mainWindow })
   bootLog('托盘已创建，启动完成')
 
   app.on('activate', () => {

@@ -1,20 +1,15 @@
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
-import { Menu, Tray, app, nativeImage } from 'electron'
+import { Menu, Tray, app } from 'electron'
 import type { BrowserWindow } from 'electron'
-import type { ProjectPaths } from './core/paths'
+import { resolveTrayIcon } from './icon'
 
 interface TrayOptions {
-  paths: ProjectPaths
   getWindow: () => BrowserWindow | null
 }
 
 export function createTray(options: TrayOptions): Tray {
-  const iconPath = join(options.paths.resourcesDir, 'icon.png')
-
-  // 图标缺失时用空图标兜底，不能因为少个资源就让整个应用起不来
-  let icon = existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty()
-  if (!icon.isEmpty()) icon = icon.resize({ width: 16, height: 16 })
+  // 图标路径由 icon.ts 统一解析（用 process.resourcesPath，不能用 paths.resourcesDir —— 见那里的注释）。
+  // 找不到时用空图标兜底，不能因为少个资源就让整个应用起不来。
+  const icon = resolveTrayIcon()
 
   const tray = new Tray(icon)
   tray.setToolTip('RPA_Pilot · 本地 Python 任务管理')
