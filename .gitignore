@@ -1,0 +1,30 @@
+# 依赖与构建产物
+node_modules/
+out/
+out-installer/
+dist/
+release/
+
+# 在线更新：本机联调用的更新包目录（正式部署时这些文件在服务器上）
+updates/
+
+# 项目内重定向的缓存
+.pnpm-store/
+.cache/
+
+# 运行时与数据（不进版本库）
+runtime/
+data/
+logs/
+
+# TypeScript 增量构建缓存
+*.tsbuildinfo
+
+# 本地临时文件
+.tmp-*
+*.bak
+
+# 杂项
+*.log
+.DS_Store
+Thumbs.db

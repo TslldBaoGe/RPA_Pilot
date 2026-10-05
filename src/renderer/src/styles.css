@@ -1,0 +1,28 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  color: #1f2329;
+  background: #f5f7fa;
+  /* 桌面应用：禁止整页选中与拖拽，更像原生客户端 */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+code,
+.path-text {
+  font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  -webkit-user-select: text;
+  user-select: text;
+}

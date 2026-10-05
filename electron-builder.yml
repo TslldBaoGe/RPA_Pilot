@@ -1,0 +1,70 @@
+appId: com.rpapilot.desktop
+productName: RPA_Pilot
+copyright: Copyright © 2026
+
+directories:
+  # 产物不放进源码树以外的奇怪位置，但仍单独成目录，方便打包后整体拷走或删除
+  output: out-installer
+  buildResources: resources
+
+# 关掉 electron-builder 的「自动重编译原生模块」。
+# 理由：唯一的原生模块 better-sqlite3 v13 是 N-API 实现，npm 包内自带
+# prebuilds/win32-x64.node，在 Node 与 Electron 之间 ABI 通用，不需要重编译。
+# 开着它反而会走 node-gyp：既要 MSVC 工具链，又要联网下载 Electron 头文件，
+# 实测直接连接超时（而且本机也没有 MSVC）。详见设计文档第 11 节的实测记录。
+npmRebuild: false
+
+# 只把 electron-vite 编译出来的东西打进包。
+# 生产依赖（better-sqlite3、croner、electron-log）由 electron-builder 依据 package.json 自动收集。
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+
+# better-sqlite3 的 .node 预编译包不能待在 asar 里 —— 原生模块无法从 asar 内加载
+asarUnpack:
+  - node_modules/better-sqlite3/**/*
+
+# 托盘图标需要出现在 <安装目录>\resources\icon.png
+# （main 里的 resolveProjectRoot 会把 app.asar 剥掉再上一级，正好对上）
+extraResources:
+  - from: resources
+    to: .
+    filter:
+      - '**/*'
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.ico
+  artifactName: RPA_Pilot-${version}-setup.${ext}
+
+# 在线更新的发布源。这个值会被写进安装包内的 resources\app-update.yml，
+# 作为更新检查的默认地址。
+#
+# ⚠️⚠️ 发版前必须把下面这行改成你们真实的内网更新目录地址 ⚠️⚠️
+#     改完必须**重新打包**：地址是打包时烘进去的，改配置不会影响已有的安装包。
+#     `pnpm release:check` 会拦住占位地址和 127.0.0.1，防止把本机地址发出去。
+#
+# 客户端额外支持两级运行时覆盖（见 src/main/updater.ts），优先级从高到低：
+#   1. 环境变量 RPA_PILOT_UPDATE_URL（联调、特殊部署用）
+#   2. 设置表里的 updateFeedUrl（界面可改，无需重新打包）
+publish:
+  provider: generic
+  url: http://updates.example.com/rpa-pilot/
+
+nsis:
+  # 走「可选择的安装向导」，而不是一键静默安装 —— 业务同事需要看到装到哪了
+  oneClick: false
+  # 按用户安装到 %LOCALAPPDATA%\Programs，无需管理员权限
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: RPA_Pilot
+  # 数据与日志在 %LOCALAPPDATA%\RPA_Pilot，卸载时保留（双保险）
+  deleteAppDataOnUninstall: false
+  # 装完不自动启动，免得业务同事装机时被突然弹窗吓到
+  runAfterFinish: false
