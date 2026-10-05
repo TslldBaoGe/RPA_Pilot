@@ -47,7 +47,6 @@ IMAGE="${IMAGE:-nginx:alpine}"
 NGINX_START="${NGINX_START:-0}"
 
 SKIP_FIREWALL="${SKIP_FIREWALL:-0}"
-SKIP_CRON="${SKIP_CRON:-0}"
 SKIP_CHECK="${SKIP_CHECK:-0}"
 NGINX_MODE="${NGINX_MODE:-auto}"     # auto | skip
 
