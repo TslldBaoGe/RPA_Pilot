@@ -1,5 +1,5 @@
 import { appendFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { BrowserWindow, app } from 'electron'
 import type { Tray } from 'electron'
 import { openDatabase, readStats } from './core/db'
@@ -161,11 +161,19 @@ async function bootstrap(): Promise<void> {
 
   const settings = readAppSettings(db)
 
-  // 启动时扫描 tasks\ 目录，把新出现的脚本登记成「待配置」任务（设计文档 7.2）
+  // 任务脚本目录允许被用户改到任意文件夹（设置里存的就是它）；启动时先应用再扫描。
+  // 留空则用默认的 <工作目录>\tasks。
+  const configuredTasksDir = settings.tasksDir.trim()
+  if (configuredTasksDir) {
+    paths.tasksDir = resolve(configuredTasksDir)
+    bootLog(`任务目录 = ${paths.tasksDir}（用户指定）`)
+  }
+
+  // 启动时扫描任务目录，把新出现的脚本登记成「待配置」任务（设计文档 7.2）
   const scanned = syncTasksFromDisk(paths, db)
   if (scanned.added > 0) {
     console.log(
-      `[rpa-pilot] 扫描 tasks\\ 目录：发现 ${scanned.scanned} 个脚本，新登记 ${scanned.added} 个`
+      `[rpa-pilot] 扫描 ${paths.tasksDir}：发现 ${scanned.scanned} 个脚本，新登记 ${scanned.added} 个`
     )
   }
   if (scanned.missing > 0) {

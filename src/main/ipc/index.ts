@@ -18,6 +18,7 @@ import type {
   ScriptInspectResult,
   SettingsPatch,
   SettingsView,
+  TasksDirChangeResult,
   TaskInput,
   TaskSyncResult,
   TaskView,
@@ -62,6 +63,7 @@ import type { UpdaterConfig } from '../updater'
 import {
   createTask,
   deleteTask,
+  freezeRelativeScriptPaths,
   inspectScript,
   listTasks,
   resolveScriptPath,
@@ -72,6 +74,7 @@ import {
 } from '../core/tasks'
 
 const CONDA_DIR_SETTING = 'condaDir'
+const TASKS_DIR_SETTING = 'tasksDir'
 
 /** 约束 C1 的运行时兜底：拒绝渲染进程打开项目目录之外的任何路径 */
 function assertInsideRoot(paths: ProjectPaths, target: string): string {
@@ -125,6 +128,36 @@ export function registerIpc(paths: ProjectPaths, db: Db): void {
   /** 每次都重新解析：用户在界面上改了位置之后不需要重启应用 */
   const currentConda = (): CondaResolution => resolveCondaDir(getSetting(db, CONDA_DIR_SETTING))
 
+  /** 默认任务目录：<工作目录>\tasks */
+  const defaultTasksDir = (): string => join(paths.root, 'tasks')
+
+  /**
+   * 切换任务脚本目录。
+   *
+   * 换之前先把库里的相对脚本路径固化成绝对路径 —— 否则换完目录之后，
+   * 老任务的相对路径会改按新目录解析，全部变成「脚本缺失」，看起来像丢了数据。
+   * 固化之后再扫一遍新目录，把里面的 .py 登记成「待配置」任务。
+   */
+  const applyTasksDir = (next: string | null): Omit<TasksDirChangeResult, 'settings' | 'canceled'> => {
+    const target = next ? resolve(next) : defaultTasksDir()
+    const oldDir = paths.tasksDir
+
+    if (target === oldDir) {
+      const same = syncTasksFromDisk(paths, db)
+      return { frozen: 0, scanned: same.scanned, added: same.added }
+    }
+
+    const frozen = freezeRelativeScriptPaths(db, oldDir)
+    paths.tasksDir = target
+    setSetting(db, TASKS_DIR_SETTING, next ? target : null)
+
+    const scanned = syncTasksFromDisk(paths, db)
+    // 脚本位置变了，定时注册表里还是旧记录，重建一次让执行器拿到新路径
+    reloadAll()
+
+    return { frozen, scanned: scanned.scanned, added: scanned.added }
+  }
+
   const buildSettingsView = (): SettingsView => {
     const settings = readAppSettings(db)
     const logStats = measureLogs(paths)
@@ -144,6 +177,9 @@ export function registerIpc(paths: ProjectPaths, db: Db): void {
       logBytes: logStats.bytes,
       dataRoot: paths.root,
       appVersion: app.getVersion(),
+      tasksDir: paths.tasksDir,
+      tasksDirDefault: defaultTasksDir(),
+      tasksDirCustom: (getSetting(db, TASKS_DIR_SETTING) ?? '').trim() !== '',
       bundledUpdateFeedUrl: getBundledFeedUrl()
     }
   }
@@ -332,6 +368,38 @@ export function registerIpc(paths: ProjectPaths, db: Db): void {
   ipcMain.handle('tasks:scripts', (): string[] => scanTaskScripts(paths))
 
   ipcMain.handle('tasks:sync', (): TaskSyncResult => syncTasksFromDisk(paths, db))
+
+  /**
+   * 切换任务脚本目录（存 .py 的文件夹可以不在默认的 <工作目录>\tasks 下）。
+   * 取消选择时原样返回当前设置，不改任何东西。
+   */
+  ipcMain.handle('tasks:chooseDir', async (): Promise<TasksDirChangeResult> => {
+    const result = await dialog.showOpenDialog({
+      title: '选择存放任务脚本（.py）的文件夹',
+      properties: ['openDirectory'],
+      defaultPath: paths.tasksDir
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { settings: buildSettingsView(), canceled: true, frozen: 0, scanned: 0, added: 0 }
+    }
+
+    const changes = applyTasksDir(resolve(result.filePaths[0]))
+    return { settings: buildSettingsView(), canceled: false, ...changes }
+  })
+
+  /** 恢复默认任务目录 */
+  ipcMain.handle('tasks:resetDir', (): TasksDirChangeResult => {
+    const changes = applyTasksDir(null)
+    return { settings: buildSettingsView(), canceled: false, ...changes }
+  })
+
+  /**
+   * 在资源管理器中打开当前任务目录。
+   * 刻意不走 assertInsideRoot：任务目录本来就可能被用户设到别的盘，
+   * 和 shell:showScript 同理，这里只是打开一个目录，不读内容。
+   */
+  ipcMain.handle('tasks:openDir', async (): Promise<string> => shell.openPath(paths.tasksDir))
 
   ipcMain.handle('tasks:create', (_event, raw: unknown): TaskView => {
     const created = createTask(db, envNames(), paths, asTaskInput(raw))

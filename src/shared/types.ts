@@ -183,6 +183,14 @@ export interface SettingsView {
   dataRoot: string
   appVersion: string
 
+  /* 任务脚本目录（可改到任意文件夹，默认 <工作目录>\tasks） */
+  /** 当前生效的任务目录 */
+  tasksDir: string
+  /** 默认任务目录，用于「恢复默认」 */
+  tasksDirDefault: string
+  /** 用户是否改过（改过才显示「恢复默认」） */
+  tasksDirCustom: boolean
+
   /* 在线更新 */
   updateFeedUrl: string
   autoCheckUpdate: boolean
@@ -202,6 +210,22 @@ export interface SettingsPatch {
   autoCheckUpdate?: boolean
   autoDownloadUpdate?: boolean
   autoInstallOnQuit?: boolean
+}
+
+/**
+ * 切换任务脚本目录的结果。
+ * 除了新的设置，还带上「实际做了什么」，界面才能给出准确提示而不是含糊的「已保存」。
+ */
+export interface TasksDirChangeResult {
+  settings: SettingsView
+  /** 用户在目录选择框里点了取消；此时没有任何改动，界面不该提示「已更新」 */
+  canceled: boolean
+  /** 有多少个老任务的相对脚本路径被固化成绝对路径（换目录后仍指向原文件） */
+  frozen: number
+  /** 在新目录里扫到多少个 .py */
+  scanned: number
+  /** 其中新登记了几个任务 */
+  added: number
 }
 
 export interface LogCleanupView {

@@ -20,6 +20,7 @@ import type {
   NotifyTestResult,
   TaskInput,
   TaskSyncResult,
+  TasksDirChangeResult,
   TaskView,
   UpdateInstallResult,
   UpdateState
@@ -72,6 +73,12 @@ const api = {
     ipcRenderer.invoke('shell:showScript', taskId),
   /** 扫描 tasks\ 目录并同步进库 */
   syncTasks: (): Promise<TaskSyncResult> => ipcRenderer.invoke('tasks:sync'),
+  /** 弹出目录选择框切换任务脚本目录；取消时原样返回当前设置 */
+  chooseTasksDir: (): Promise<TasksDirChangeResult> => ipcRenderer.invoke('tasks:chooseDir'),
+  /** 恢复默认任务目录（<工作目录>\tasks） */
+  resetTasksDir: (): Promise<TasksDirChangeResult> => ipcRenderer.invoke('tasks:resetDir'),
+  /** 在资源管理器中打开当前任务目录；返回空字符串表示成功 */
+  openTasksDir: (): Promise<string> => ipcRenderer.invoke('tasks:openDir'),
   createTask: (input: TaskInput): Promise<TaskView> => ipcRenderer.invoke('tasks:create', input),
   updateTask: (id: string, input: TaskInput): Promise<TaskView> =>
     ipcRenderer.invoke('tasks:update', id, input),

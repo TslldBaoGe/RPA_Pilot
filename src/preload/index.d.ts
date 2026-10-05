@@ -18,6 +18,7 @@ import type {
   NotifyTestResult,
   TaskInput,
   TaskSyncResult,
+  TasksDirChangeResult,
   TaskView,
   UpdateInstallResult,
   UpdateState
@@ -50,6 +51,12 @@ export interface RpaPilotApi {
   /** 在资源管理器中定位任务的脚本 */
   showScriptInFolder(taskId: string): Promise<{ ok: boolean; path: string }>
   syncTasks(): Promise<TaskSyncResult>
+  /** 弹出目录选择框切换任务脚本目录；取消时原样返回当前设置 */
+  chooseTasksDir(): Promise<TasksDirChangeResult>
+  /** 恢复默认任务目录（<工作目录>\tasks） */
+  resetTasksDir(): Promise<TasksDirChangeResult>
+  /** 在资源管理器中打开当前任务目录；返回空字符串表示成功 */
+  openTasksDir(): Promise<string>
   createTask(input: TaskInput): Promise<TaskView>
   updateTask(id: string, input: TaskInput): Promise<TaskView>
   deleteTask(id: string): Promise<{ ok: true }>

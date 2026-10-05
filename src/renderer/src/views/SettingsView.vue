@@ -11,6 +11,8 @@ const errorText = ref<string | null>(null)
 const saving = ref(false)
 const testing = ref(false)
 const cleaning = ref(false)
+/** 任务目录选择/恢复默认进行中（弹框期间按钮转圈，避免重复点） */
+const choosingTasksDir = ref(false)
 
 /**
  * 飞书 Webhook 必须用「本地状态 + v-model」来编辑，不能直接单向绑 settings。
@@ -122,6 +124,51 @@ async function openDataRoot(): Promise<void> {
   if (!settings.value) return
   const failure = await window.api.openPath(settings.value.dataRoot)
   if (failure) ElMessage.error(`打开失败：${failure}`)
+}
+
+/* ── 任务目录 ───────────────────────────────────────── */
+
+async function openTasksDir(): Promise<void> {
+  const failure = await window.api.openTasksDir()
+  if (failure) ElMessage.error(`打开失败：${failure}`)
+}
+
+/** 把「做了什么」说清楚，比一句「已保存」有用得多 */
+function describeTasksDirChange(frozen: number, scanned: number, added: number): string {
+  const bits: string[] = []
+  if (frozen > 0) bits.push(`${frozen} 个已有任务的脚本路径已固定为原位置`)
+  if (added > 0) bits.push(`新登记 ${added} 个脚本`)
+  else if (scanned > 0) bits.push(`该目录下 ${scanned} 个脚本都已在列表中`)
+  return bits.length > 0 ? `任务目录已更新：${bits.join('，')}` : '任务目录已更新'
+}
+
+async function chooseTasksDir(): Promise<void> {
+  choosingTasksDir.value = true
+  errorText.value = null
+  try {
+    const result = await window.api.chooseTasksDir()
+    settings.value = result.settings
+    if (result.canceled) return
+    ElMessage.success(describeTasksDirChange(result.frozen, result.scanned, result.added))
+  } catch (err) {
+    errorText.value = cleanIpcError(err)
+  } finally {
+    choosingTasksDir.value = false
+  }
+}
+
+async function resetTasksDir(): Promise<void> {
+  choosingTasksDir.value = true
+  errorText.value = null
+  try {
+    const result = await window.api.resetTasksDir()
+    settings.value = result.settings
+    ElMessage.success(describeTasksDirChange(result.frozen, result.scanned, result.added))
+  } catch (err) {
+    errorText.value = cleanIpcError(err)
+  } finally {
+    choosingTasksDir.value = false
+  }
 }
 
 const logSizeText = computed(() => {
@@ -267,12 +314,37 @@ const autoStartHint = computed(() => {
             <el-button link type="primary" size="small" @click="openDataRoot">打开</el-button>
           </div>
         </el-descriptions-item>
+        <el-descriptions-item label="任务目录">
+          <div class="path-line">
+            <span class="path-text">{{ settings?.tasksDir ?? '—' }}</span>
+            <span class="path-actions">
+              <el-button link type="primary" size="small" @click="openTasksDir">打开</el-button>
+              <el-button link type="primary" size="small" :loading="choosingTasksDir" @click="chooseTasksDir">
+                选择文件夹
+              </el-button>
+              <el-button
+                v-if="settings?.tasksDirCustom"
+                link
+                type="primary"
+                size="small"
+                :disabled="choosingTasksDir"
+                @click="resetTasksDir"
+              >
+                恢复默认
+              </el-button>
+            </span>
+          </div>
+        </el-descriptions-item>
         <el-descriptions-item label="客户端版本">{{ settings?.appVersion ?? '—' }}</el-descriptions-item>
       </el-descriptions>
       <p class="note">
-        数据库、任务脚本（<span class="path-text">tasks\</span>）与日志都在这个目录下。
-        打包版本里它位于 <span class="path-text">%LOCALAPPDATA%\RPA_Pilot</span>，
-        刻意不放在安装目录 —— 安装目录在升级或卸载时会被动，放在那里数据迟早会丢。
+        数据库与日志固定在工作目录下；打包版本里它在
+        <span class="path-text">%LOCALAPPDATA%\RPA_Pilot</span>，刻意不放在安装目录 ——
+        安装目录在升级或卸载时会被动，放在那里数据迟早会丢。
+        <br />
+        任务目录默认是工作目录下的 <span class="path-text">tasks\</span>，可以改到任意文件夹，
+        应用会扫描该目录里的 .py。改目录时，已登记任务里用相对路径的会先固定成绝对路径，
+        仍然指向原来的文件，不会变成「脚本缺失」。
       </p>
     </el-card>
   </div>
@@ -389,6 +461,14 @@ const autoStartHint = computed(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+/* 路径右边的按钮组：不换行、不被长路径挤走 */
+.path-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .path-text {

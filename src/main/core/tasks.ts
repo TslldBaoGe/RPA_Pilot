@@ -159,6 +159,35 @@ export function syncTasksFromDisk(paths: ProjectPaths, db: Db): TaskSyncResult {
   return { added, scanned: scripts.length, missing, scripts }
 }
 
+/**
+ * 把库里「相对任务目录」的脚本路径就地固化成绝对路径。
+ *
+ * 为什么需要：相对路径是相对**当时的任务目录**解析的。用户把任务目录换到别的文件夹之后，
+ * 同一个相对路径会解析到新目录下，老任务立刻全部变成「脚本缺失」——看起来像丢了数据。
+ * 换目录前先把相对路径固化成绝对路径，任务就仍然指着原来的文件，只是从「目录内」变成「外部引用」。
+ */
+export function freezeRelativeScriptPaths(db: Db, oldTasksDir: string): number {
+  const rows = db.prepare('SELECT id, script_path FROM tasks').all() as Pick<
+    TaskRow,
+    'id' | 'script_path'
+  >[]
+  const update = db.prepare('UPDATE tasks SET script_path = ?, updated_at = ? WHERE id = ?')
+  const now = new Date().toISOString()
+
+  let changed = 0
+  const run = db.transaction(() => {
+    for (const row of rows) {
+      const raw = (row.script_path ?? '').trim()
+      if (!raw || isAbsolute(raw)) continue
+      update.run(resolve(oldTasksDir, raw), now, row.id)
+      changed += 1
+    }
+  })
+  run()
+
+  return changed
+}
+
 function defaultNameFor(scriptPath: string): string {
   const base = scriptPath.split(/[\\/]/).pop() ?? scriptPath
   return base.replace(/\.py$/i, '') || '未命名任务'

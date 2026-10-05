@@ -37,6 +37,12 @@ export interface AppSettings {
   /** 运行日志总体积上限（MB），超出则从最旧的开始删 */
   logMaxTotalMb: number
 
+  /**
+   * 任务脚本目录。留空 = 用默认的 <工作目录>\tasks。
+   * 用户可以把任务放到任意文件夹（例如 D:\我的脚本）。
+   */
+  tasksDir: string
+
   /* 在线更新 */
   /** 更新源地址；留空则使用打包时烘进 app-update.yml 的默认值 */
   updateFeedUrl: string
@@ -54,6 +60,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   feishuWebhook: '',
   logRetentionDays: 30,
   logMaxTotalMb: 2048,
+  tasksDir: '',
   updateFeedUrl: '',
   autoCheckUpdate: true,
   autoDownloadUpdate: true,
@@ -67,6 +74,7 @@ export const SETTING_KEYS = {
   feishuWebhook: 'feishuWebhook',
   logRetentionDays: 'logRetentionDays',
   logMaxTotalMb: 'logMaxTotalMb',
+  tasksDir: 'tasksDir',
   updateFeedUrl: 'updateFeedUrl',
   autoCheckUpdate: 'autoCheckUpdate',
   autoDownloadUpdate: 'autoDownloadUpdate',
@@ -94,6 +102,7 @@ export function readAppSettings(db: Db): AppSettings {
     feishuWebhook: getSetting(db, SETTING_KEYS.feishuWebhook) ?? DEFAULT_SETTINGS.feishuWebhook,
     logRetentionDays: readInt(db, SETTING_KEYS.logRetentionDays, DEFAULT_SETTINGS.logRetentionDays, 1, 3650),
     logMaxTotalMb: readInt(db, SETTING_KEYS.logMaxTotalMb, DEFAULT_SETTINGS.logMaxTotalMb, 50, 102_400),
+    tasksDir: getSetting(db, SETTING_KEYS.tasksDir) ?? DEFAULT_SETTINGS.tasksDir,
     updateFeedUrl: getSetting(db, SETTING_KEYS.updateFeedUrl) ?? DEFAULT_SETTINGS.updateFeedUrl,
     autoCheckUpdate: readBool(db, SETTING_KEYS.autoCheckUpdate, DEFAULT_SETTINGS.autoCheckUpdate),
     autoDownloadUpdate: readBool(db, SETTING_KEYS.autoDownloadUpdate, DEFAULT_SETTINGS.autoDownloadUpdate),
@@ -114,6 +123,9 @@ export function writeAppSettings(db: Db, patch: Partial<AppSettings>): AppSettin
   }
   if (patch.logMaxTotalMb !== undefined) {
     setSetting(db, SETTING_KEYS.logMaxTotalMb, String(Math.trunc(patch.logMaxTotalMb)))
+  }
+  if (patch.tasksDir !== undefined) {
+    setSetting(db, SETTING_KEYS.tasksDir, patch.tasksDir.trim())
   }
   if (patch.updateFeedUrl !== undefined) {
     setSetting(db, SETTING_KEYS.updateFeedUrl, patch.updateFeedUrl.trim())
