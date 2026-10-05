@@ -23,6 +23,7 @@
 #   ./sync-updates.sh --target /var/www/rpa-pilot --keep 3
 #   ./sync-updates.sh --check                           # 只看现在是什么版本，不下载
 #   ./sync-updates.sh --force                           # 版本相同也重下（修复损坏的产物）
+#   GH_PROXY=https://gh-proxy.com ./sync-updates.sh     # 国内加速：安装包走镜像，latest.yml 仍直连
 #
 # cron（每 15 分钟）：
 #   */15 * * * * /usr/local/bin/sync-updates.sh >> /var/log/rpa-pilot-sync.log 2>&1
@@ -37,6 +38,13 @@ LOG_FILE="${LOG_FILE:-}"
 OWNER="${OWNER:-}"                       # 同步后把文件属主改成它，例如 www-data
 RELEASE_BASE="${RELEASE_BASE:-https://github.com/${REPO}/releases/latest/download}"
 ASSET_PREFIX="${ASSET_PREFIX:-RPA_Pilot}"  # 安装包名前缀，用于清理旧版本
+
+# 国内服务器直连 GitHub Releases 常常只有几十 KB/s（实测约 65 KB/s，115 MB 要半小时以上）。
+# 设 GH_PROXY 走加速镜像，**只作用于大文件**（安装包 / 差量索引）：latest.yml 始终直连 GitHub 取，
+# 所以版本号和 sha512 的来历始终是可信源 —— 镜像万一被篡改或下载损坏，
+# 会被安装包的 sha512 校验拦住（见 verify_sha512）。镜像失败会自动回退直连。
+# 例：GH_PROXY=https://gh-proxy.com（留空则全部直连）
+GH_PROXY="${GH_PROXY:-}"
 
 FORCE=0
 CHECK_ONLY=0
@@ -55,7 +63,8 @@ warn() { log WARN "$1"; }
 die()  { log ERROR "$1"; exit 1; }
 
 usage() {
-    sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+    # 只打印文件开头的注释块，遇到第一行非注释就停（别把代码也打出来）
+    awk 'NR>1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
     exit 0
 }
 
@@ -83,6 +92,44 @@ command -v curl >/dev/null 2>&1 || die "找不到 curl，请先安装：apt inst
 read_field() {
     local file="$1" key="$2"
     sed -n "s/^${key}:[[:space:]]*//p" "$file" 2>/dev/null | head -1 | tr -d '\r' | sed 's/^["'"'"']//; s/["'"'"']$//'
+}
+
+# 拼资产下载地址。big=1 且配了镜像时才走镜像（latest.yml 很小，直连即可，且更可信）
+asset_url() {
+    local name="$1" big="${2:-0}"
+    if [ "$big" = "1" ] && [ -n "$GH_PROXY" ]; then
+        printf '%s/%s/%s' "${GH_PROXY%/}" "$RELEASE_BASE" "$name"
+    else
+        printf '%s/%s' "$RELEASE_BASE" "$name"
+    fi
+}
+
+# 校验安装包的 sha512（latest.yml 里存的是 base64）。校验工具缺失时告警并跳过，不阻塞同步。
+verify_sha512() {
+    local file="$1" expected="$2"
+    [ -n "$expected" ] || return 0
+    command -v openssl >/dev/null 2>&1 || { warn "没有 openssl，跳过 sha512 校验"; return 0; }
+    local got
+    got="$(openssl dgst -sha512 -binary "$file" 2>/dev/null | openssl base64 -A 2>/dev/null || true)"
+    [ -n "$got" ] || { warn "计算 sha512 失败，跳过校验"; return 0; }
+    [ "$got" = "$expected" ]
+}
+
+# 下载一个资产：优先走镜像（若配了），失败再直连 GitHub
+download_asset() {
+    local name="$1" dest="$2" max_time="$3"
+    if [ -n "$GH_PROXY" ]; then
+        info "下载 ${name}（加速镜像 ${GH_PROXY}）"
+        if curl -fsSL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time "$max_time" \
+                --speed-limit 1024 --speed-time 120 "$(asset_url "$name" 1)" -o "$dest"; then
+            return 0
+        fi
+        warn "镜像下载 ${name} 失败，改直连 GitHub 重试"
+    else
+        info "下载 ${name}"
+    fi
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time "$max_time" \
+        --speed-limit 1024 --speed-time 120 "$(asset_url "$name" 0)" -o "$dest"
 }
 
 info "开始同步：仓库 $REPO → 目标目录 $TARGET_DIR"
@@ -163,19 +210,28 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
 fi
 
 # ── 3) 下载安装包与差量索引 ─────────────────────────────
-info "下载 ${PACKAGE}"
 # 必须设 --max-time：只设 --connect-timeout 的话，服务器接受连接后卡住不响应，
 # curl 会一直挂着，而锁也就一直被占住 —— 之后每次 cron 都只能跳过。
 # --speed-limit/--speed-time 进一步防「连上了但传输停滞」。
-curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 1800 \
-    --speed-limit 1024 --speed-time 120 \
-    "${RELEASE_BASE}/${PACKAGE}" -o "${TMP_DIR}/${PACKAGE}" \
+download_asset "${PACKAGE}" "${TMP_DIR}/${PACKAGE}" 1800 \
     || die "下载安装包失败：${RELEASE_BASE}/${PACKAGE}"
 
-info "下载 ${BLOCKMAP}"
+# 校验 sha512：latest.yml 是直连 GitHub 取的（可信来源），拿它来验安装包。
+# 安装包若走了镜像，这一步能同时发现「被篡改」和「下载损坏」。
+EXPECT_SHA="$(read_field "${TMP_DIR}/latest.yml" sha512)"
+if [ -n "$EXPECT_SHA" ]; then
+    if verify_sha512 "${TMP_DIR}/${PACKAGE}" "$EXPECT_SHA"; then
+        info "安装包 sha512 校验通过"
+    else
+        rm -f "${TMP_DIR}/${PACKAGE}"
+        die "安装包 sha512 与 latest.yml 声明不一致（下载损坏，或镜像不可信）"
+    fi
+else
+    warn "latest.yml 里没有 sha512 字段，跳过校验"
+fi
+
 # blockmap 缺失不该让整个同步失败：没有它只是退化成整包下载，功能不受影响
-if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 300 \
-        "${RELEASE_BASE}/${BLOCKMAP}" -o "${TMP_DIR}/${BLOCKMAP}"; then
+if ! download_asset "${BLOCKMAP}" "${TMP_DIR}/${BLOCKMAP}" 300; then
     warn "下载 blockmap 失败，将跳过差量索引（客户端会整包下载）"
     rm -f "${TMP_DIR}/${BLOCKMAP}"
 fi

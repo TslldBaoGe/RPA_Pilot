@@ -23,6 +23,7 @@
 #   ENABLE_CRON=1                        想让服务器每 15 分钟自动拉时才需要
 #   NGINX_START=1                        仅在 SERVE_MODE=nginx 时用于「启动宿主机 nginx」
 #   SKIP_FIREWALL=1 SKIP_CHECK=1 NGINX_MODE=skip
+#   GH_PROXY=https://gh-proxy.com        安装包走加速镜像（已默认启用，留空则直连 GitHub）
 #
 set -euo pipefail
 
@@ -38,6 +39,11 @@ WRAPPER_PATH="${WRAPPER_PATH:-/usr/local/bin/rpa-sync}"
 CRON_SCHEDULE="${CRON_SCHEDULE:-*/15 * * * *}"
 # 默认不装 cron，改由人工执行 rpa-sync；要定时自动拉就设 ENABLE_CRON=1
 ENABLE_CRON="${ENABLE_CRON:-0}"
+
+# 国内服务器直连 GitHub Releases 实测只有几十 KB/s（115 MB 要半小时以上）。
+# 默认让拉取脚本把「大文件」走加速镜像；latest.yml 仍直连 GitHub 取，
+# 且安装包会做 sha512 校验，镜像失败自动回退直连。想全部直连就设 GH_PROXY=。
+GH_PROXY="${GH_PROXY:-https://gh-proxy.com}"
 
 # 默认用独立容器提供服务：和宿主机上已有的站点（尤其是别人的 Docker 容器）完全隔离。
 # 很多机器上 80 端口属于另一个项目，动宿主机 nginx 容易把别人的站搞挂。
@@ -128,6 +134,9 @@ cat > "$WRAPPER_PATH" <<EOF
 # 用法：sudo rpa-sync            （同步到最新版）
 #       sudo rpa-sync --check    （只看远端是什么版本，不下载）
 #       sudo rpa-sync --force    （版本相同也重下，用于修复损坏的产物）
+# 大文件走加速镜像（latest.yml 仍直连 GitHub，安装包有 sha512 校验，镜像失败自动回退）
+export GH_PROXY='${GH_PROXY}'
+
 exec ${BIN_PATH} \\
   --target '${TARGET_DIR}' \\
   --owner '${WEB_USER}' \\
