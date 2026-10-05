@@ -91,6 +91,15 @@ const pathRows = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* 同「设置」页：隐藏滚动条本身，内容超出时仍可用滚轮滚动 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.page::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .page-header {

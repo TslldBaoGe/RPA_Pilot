@@ -254,6 +254,16 @@ const autoStartHint = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* 隐藏滚动条本身（内容超出时滚轮照常能滚）：
+     这条竖条既占宽度又难看，而页面本来就是上下翻卡片，不需要靠它提示 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.page::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .page-header {
