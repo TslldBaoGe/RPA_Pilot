@@ -40,9 +40,9 @@ CRON_SCHEDULE="${CRON_SCHEDULE:-*/15 * * * *}"
 # 默认不装 cron，改由人工执行 rpa-sync；要定时自动拉就设 ENABLE_CRON=1
 ENABLE_CRON="${ENABLE_CRON:-0}"
 
-# 国内服务器直连 GitHub Releases 实测只有几十 KB/s（115 MB 要半小时以上）。
-# 默认让拉取脚本把「大文件」走加速镜像；latest.yml 仍直连 GitHub 取，
-# 且安装包会做 sha512 校验，镜像失败自动回退直连。想全部直连就设 GH_PROXY=。
+# 国内服务器直连 GitHub Releases 实测只有几十 KB/s（115 MB 要半小时以上），而且直连还经常被重置。
+# 默认让拉取脚本把大文件走加速镜像；latest.yml 优先直连 GitHub（可信来源），直连不通才退镜像；
+# 安装包会做 sha512 校验，镜像失败自动回退直连。想全部直连就设 GH_PROXY=。
 GH_PROXY="${GH_PROXY:-https://gh-proxy.com}"
 
 # 默认用独立容器提供服务：和宿主机上已有的站点（尤其是别人的 Docker 容器）完全隔离。
@@ -134,7 +134,7 @@ cat > "$WRAPPER_PATH" <<EOF
 # 用法：sudo rpa-sync            （同步到最新版）
 #       sudo rpa-sync --check    （只看远端是什么版本，不下载）
 #       sudo rpa-sync --force    （版本相同也重下，用于修复损坏的产物）
-# 大文件走加速镜像（latest.yml 仍直连 GitHub，安装包有 sha512 校验，镜像失败自动回退）
+# 大文件走加速镜像；latest.yml 优先直连（不通才退镜像），安装包有 sha512 校验，镜像失败自动回退
 export GH_PROXY='${GH_PROXY}'
 
 exec ${BIN_PATH} \\

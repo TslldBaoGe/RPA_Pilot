@@ -40,11 +40,16 @@ RELEASE_BASE="${RELEASE_BASE:-https://github.com/${REPO}/releases/latest/downloa
 ASSET_PREFIX="${ASSET_PREFIX:-RPA_Pilot}"  # 安装包名前缀，用于清理旧版本
 
 # 国内服务器直连 GitHub Releases 常常只有几十 KB/s（实测约 65 KB/s，115 MB 要半小时以上）。
-# 设 GH_PROXY 走加速镜像，**只作用于大文件**（安装包 / 差量索引）：latest.yml 始终直连 GitHub 取，
-# 所以版本号和 sha512 的来历始终是可信源 —— 镜像万一被篡改或下载损坏，
-# 会被安装包的 sha512 校验拦住（见 verify_sha512）。镜像失败会自动回退直连。
+# 设 GH_PROXY 走加速镜像：大文件（安装包 / 差量索引）默认走镜像；
+# latest.yml 优先直连 GitHub 取（它的版本号与 sha512 是可信来源，用来校验安装包），
+# 直连不通时才退回镜像并告警。镜像万一被篡改或下载损坏，会被 sha512 校验拦住。
 # 例：GH_PROXY=https://gh-proxy.com（留空则全部直连）
 GH_PROXY="${GH_PROXY:-}"
+
+# 只有在交互终端里才显示下载进度条；cron 或输出重定向到日志时保持安静，
+# 否则 curl 的 \r 控制符会把日志文件弄脏。
+CURL_PROGRESS=()
+[ -t 2 ] && CURL_PROGRESS=(--progress-bar)
 
 FORCE=0
 CHECK_ONLY=0
@@ -120,7 +125,8 @@ download_asset() {
     local name="$1" dest="$2" max_time="$3"
     if [ -n "$GH_PROXY" ]; then
         info "下载 ${name}（加速镜像 ${GH_PROXY}）"
-        if curl -fsSL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time "$max_time" \
+        if curl -fsSL "${CURL_PROGRESS[@]+"${CURL_PROGRESS[@]}"}" \
+                --retry 2 --retry-delay 2 --connect-timeout 20 --max-time "$max_time" \
                 --speed-limit 1024 --speed-time 120 "$(asset_url "$name" 1)" -o "$dest"; then
             return 0
         fi
@@ -128,7 +134,8 @@ download_asset() {
     else
         info "下载 ${name}"
     fi
-    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time "$max_time" \
+    curl -fsSL "${CURL_PROGRESS[@]+"${CURL_PROGRESS[@]}"}" \
+        --retry 3 --retry-delay 2 --connect-timeout 20 --max-time "$max_time" \
         --speed-limit 1024 --speed-time 120 "$(asset_url "$name" 0)" -o "$dest"
 }
 
@@ -172,9 +179,19 @@ TMP_DIR="$(mktemp -d)" || die "无法创建临时目录"
 
 # ── 1) 先把 latest.yml 下到临时目录（注意：只是下载，还没发布）──
 info "读取远端最新版本信息"
-if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 120 \
+# 优先直连 GitHub：latest.yml 很小，直连拿到的是「可信来源」的版本号与 sha512，
+# 后面用它校验安装包，能顺带发现镜像被篡改。
+# 直连不通（国内网络很常见）再退回镜像，此时可信度降低，会明确告警。
+if ! curl -fsSL --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 30 \
         "${RELEASE_BASE}/latest.yml" -o "${TMP_DIR}/latest.yml"; then
-    die "下载 latest.yml 失败：${RELEASE_BASE}/latest.yml（检查仓库是否有 Release、网络是否通）"
+    if [ -n "$GH_PROXY" ]; then
+        warn "直连 GitHub 取 latest.yml 失败，改走加速镜像（此版本信息来自镜像，可信度略降）"
+        curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 60 \
+            "$(asset_url "latest.yml" 1)" -o "${TMP_DIR}/latest.yml" \
+            || die "下载 latest.yml 失败（直连与镜像都不通，检查仓库是否有 Release、网络是否通）"
+    else
+        die "下载 latest.yml 失败：${RELEASE_BASE}/latest.yml（检查仓库是否有 Release、网络是否通）"
+    fi
 fi
 
 VERSION="$(read_field "${TMP_DIR}/latest.yml" version)"
