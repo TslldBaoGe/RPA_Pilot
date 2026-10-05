@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { SettingsPatch, SettingsView } from '@shared/types'
 import UpdateCard from '../components/UpdateCard.vue'
@@ -11,6 +11,36 @@ const errorText = ref<string | null>(null)
 const saving = ref(false)
 const testing = ref(false)
 const cleaning = ref(false)
+
+/**
+ * 飞书 Webhook 必须用「本地状态 + v-model」来编辑，不能直接单向绑 settings。
+ *
+ * 踩过的坑：Element Plus 的 ElInput 在每次输入后会 await nextTick() 再把显示值
+ * 重置回 modelValue。只写 :model-value 而不接 update:model-value 时，
+ * 父组件永远不会更新这个值，于是刚敲进去的字符立刻被擦掉 —— 表现为「一个字都输不进去」。
+ */
+const webhookInput = ref('')
+const webhookSaving = ref(false)
+
+// settings 变化时同步到输入框（例如首次加载、或保存失败后回读真实状态）
+watch(
+  () => settings.value?.feishuWebhook,
+  (value) => {
+    webhookInput.value = value ?? ''
+  }
+)
+
+async function saveWebhook(): Promise<void> {
+  const next = webhookInput.value.trim()
+  if (next === (settings.value?.feishuWebhook ?? '')) return
+
+  webhookSaving.value = true
+  try {
+    await patch({ feishuWebhook: next }, next ? 'Webhook 已保存' : 'Webhook 已清空')
+  } finally {
+    webhookSaving.value = false
+  }
+}
 
 onMounted(load)
 
@@ -171,10 +201,12 @@ const autoStartHint = computed(() => {
       <div class="field">
         <div class="field-label">飞书群机器人 Webhook</div>
         <el-input
-          :model-value="settings?.feishuWebhook ?? ''"
+          v-model="webhookInput"
           placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx"
-          :disabled="saving"
-          @change="(value: string) => patch({ feishuWebhook: value }, 'Webhook 已保存')"
+          clearable
+          :disabled="saving || webhookSaving"
+          @change="saveWebhook"
+          @blur="saveWebhook"
         />
         <div class="field-hint">
           留空则只弹 Windows 系统通知。填了就会往群里发一条文本消息（含任务名、退出码、耗时、日志路径）。
