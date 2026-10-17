@@ -2,7 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { ActiveRunInfo, CondaEnvInfo, RunView, ScheduledTaskInfo, TaskView } from '@shared/types'
+import type {
+  ActiveRunInfo,
+  CondaEnvInfo,
+  RunView,
+  ScheduledTaskInfo,
+  TaskView
+} from '@shared/types'
 import RunLogDrawer from '../components/RunLogDrawer.vue'
 import TaskDialog from '../components/TaskDialog.vue'
 import { cleanIpcError } from '../utils/errors'
@@ -14,6 +20,10 @@ const envs = ref<CondaEnvInfo[]>([])
 const scripts = ref<string[]>([])
 const activeRuns = ref<ActiveRunInfo[]>([])
 const scheduled = ref<ScheduledTaskInfo[]>([])
+/** 每个任务最近一次运行，用于在列表里直接显示开始/结束/时长 */
+const latestRuns = ref<Record<string, RunView>>({})
+/** 每秒刷新一次，让「运行中」的时长实时往前走 */
+const nowMs = ref(Date.now())
 const condaReady = ref(false)
 const loading = ref(true)
 const syncing = ref(false)
@@ -28,28 +38,35 @@ const logRunId = ref<string | null>(null)
 const logHistory = ref<RunView[] | null>(null)
 
 let offRunUpdate: (() => void) | null = null
+let clock: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
-  offRunUpdate = window.api.onRunUpdate(() => {
+  offRunUpdate = window.api.onRunUpdate((event) => {
+    rememberRun(event.run)
     void loadActive()
   })
+  clock = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
   await load()
 })
 
 onBeforeUnmount(() => {
   offRunUpdate?.()
+  if (clock !== null) clearInterval(clock)
 })
 
 async function load(): Promise<void> {
   loading.value = true
   loadError.value = null
   try {
-    const [taskList, conda, scriptList, active, scheduleList] = await Promise.all([
+    const [taskList, conda, scriptList, active, scheduleList, recentRuns] = await Promise.all([
       window.api.listTasks(),
       window.api.getCondaStatus(),
       window.api.listScripts(),
       window.api.listActiveRuns(),
-      window.api.getScheduledTasks()
+      window.api.getScheduledTasks(),
+      window.api.listRuns({ limit: 300 })
     ])
     tasks.value = taskList
     envs.value = conda.envs
@@ -57,6 +74,12 @@ async function load(): Promise<void> {
     scripts.value = scriptList
     activeRuns.value = active
     scheduled.value = scheduleList
+    // listRuns 按开始时间倒序，同一任务取到第一条就是最近一次
+    const map: Record<string, RunView> = {}
+    for (const run of recentRuns) {
+      if (!map[run.taskId]) map[run.taskId] = run
+    }
+    latestRuns.value = map
   } catch (err) {
     loadError.value = cleanIpcError(err)
   } finally {
@@ -102,15 +125,13 @@ function openEdit(task: TaskView): void {
 async function execute(task: TaskView): Promise<void> {
   try {
     const result = await window.api.startRun(task.id)
+    // 不弹日志框：运行信息直接显示在任务行里，要看输出再点「日志」
+    rememberRun(result.run)
     await loadActive()
 
     if (result.note) {
       ElMessage.warning(result.note)
     }
-    // 无论如何都把日志面板打开：跳过/无需启动的情况也要让用户看到原因。
-    // 顺手拉一份历史，左边列表就能立刻列出「这次之前」的每一次执行。
-    const runs = await window.api.listRuns({ taskId: task.id, limit: 50 }).catch(() => [])
-    openLog(task.id, result.run.id, runs)
   } catch (err) {
     ElMessage.error(cleanIpcError(err))
   }
@@ -130,7 +151,7 @@ async function stopTaskRun(task: TaskView): Promise<void> {
   }
 }
 
-function openLog(taskId: string, runId: string, runs: RunView[] | null = null): void {
+function openLog(runId: string, runs: RunView[] | null = null): void {
   logHistory.value = runs
   logRunId.value = runId
   logDrawerVisible.value = true
@@ -144,10 +165,59 @@ async function openLatestLog(task: TaskView): Promise<void> {
       return
     }
     // listRuns 已按开始时间倒序，第一条就是最近一次
-    openLog(task.id, runs[0].id, runs)
+    openLog(runs[0].id, runs)
   } catch (err) {
     ElMessage.error(cleanIpcError(err))
   }
+}
+
+/** 记下某个任务最近一次运行；比已有的旧就忽略（事件可能乱序到达） */
+function rememberRun(run: RunView): void {
+  const prev = latestRuns.value[run.taskId]
+  if (prev && runStartMs(prev) > runStartMs(run)) return
+  latestRuns.value = { ...latestRuns.value, [run.taskId]: run }
+}
+
+function runStartMs(run: RunView): number {
+  return run.startedAt ? new Date(run.startedAt).getTime() : 0
+}
+
+function latestRunOf(taskId: string): RunView | null {
+  return latestRuns.value[taskId] ?? null
+}
+
+function isRunLive(run: RunView | null): boolean {
+  return !!run && (run.status === 'running' || run.status === 'queued')
+}
+
+/** MM-DD HH:mm:ss，表里空间有限，不显示年份 */
+function formatMoment(iso: string | null): string {
+  if (!iso) return '—'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+function formatRunDuration(ms: number): string {
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))} ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
+  const total = Math.floor(ms / 1000)
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m} 分 ${s} 秒`
+}
+
+/** 运行中按当前时间实时算，结束后用记录里的最终耗时 */
+function durationOf(taskId: string): string {
+  const run = latestRunOf(taskId)
+  if (!run) return '—'
+  if (run.status === 'queued') return '排队中'
+  if (run.durationMs !== null && !isRunLive(run)) return formatRunDuration(run.durationMs)
+  if (!run.startedAt) return '—'
+  const elapsed = nowMs.value - new Date(run.startedAt).getTime()
+  return elapsed >= 0 ? formatRunDuration(elapsed) : '—'
 }
 
 async function toggleEnabled(task: TaskView, enabled: boolean): Promise<void> {
@@ -343,6 +413,33 @@ const stats = computed(() => ({
           </template>
         </el-table-column>
 
+        <el-table-column label="开始运行" width="148">
+          <template #default="{ row }">
+            <span v-if="latestRunOf(row.id)?.startedAt" class="time-cell">
+              {{ formatMoment(latestRunOf(row.id)!.startedAt) }}
+            </span>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="结束运行" width="148">
+          <template #default="{ row }">
+            <span v-if="latestRunOf(row.id)?.finishedAt" class="time-cell">
+              {{ formatMoment(latestRunOf(row.id)!.finishedAt) }}
+            </span>
+            <span v-else-if="isRunLive(latestRunOf(row.id))" class="text-primary">运行中</span>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="运行时长" width="104">
+          <template #default="{ row }">
+            <span class="time-cell" :class="{ 'text-primary': isRunLive(latestRunOf(row.id)) }">
+              {{ durationOf(row.id) }}
+            </span>
+          </template>
+        </el-table-column>
+
         <el-table-column label="启用" width="76">
           <template #default="{ row }">
             <el-switch :model-value="row.enabled" @change="(value: boolean) => toggleEnabled(row, value)" />
@@ -483,6 +580,17 @@ const stats = computed(() => ({
 
 .text-danger {
   color: #f56c6c;
+}
+
+.text-primary {
+  color: #406cff;
+}
+
+.time-cell {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #4e5969;
+  white-space: nowrap;
 }
 
 .tiny {
