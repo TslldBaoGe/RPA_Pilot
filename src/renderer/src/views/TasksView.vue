@@ -427,6 +427,7 @@ const stats = computed(() => ({
             <span v-if="latestRunOf(row.id)?.finishedAt" class="time-cell">
               {{ formatMoment(latestRunOf(row.id)!.finishedAt) }}
             </span>
+            <span v-else-if="latestRunOf(row.id)?.status === 'queued'" class="muted">排队中</span>
             <span v-else-if="isRunLive(latestRunOf(row.id))" class="text-primary">运行中</span>
             <span v-else class="muted">—</span>
           </template>
