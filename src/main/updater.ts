@@ -312,8 +312,26 @@ export async function downloadUpdate(): Promise<UpdateState> {
     await autoUpdater.downloadUpdate()
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err)
-    log(`下载更新失败：${detail}`)
-    setPhase('error', detail)
+
+    // 差量下载依赖服务器支持 Range、且本地还留着上一版安装包做基准，
+    // 任一环节不满足都会失败。失败后自动退回整包再试一次，
+    // 免得用户卡在 error 状态反复手动重试。
+    if (!autoUpdater.disableDifferentialDownload) {
+      log(`差量下载失败：${detail}，改用整包重试`)
+      autoUpdater.disableDifferentialDownload = true
+      lastLoggedPercent = -1
+      lastTransferred = 0
+      try {
+        await autoUpdater.downloadUpdate()
+      } catch (retryErr) {
+        const retryDetail = retryErr instanceof Error ? retryErr.message : String(retryErr)
+        log(`整包下载也失败：${retryDetail}`)
+        setPhase('error', retryDetail)
+      }
+    } else {
+      log(`下载更新失败：${detail}`)
+      setPhase('error', detail)
+    }
   }
 
   return buildState()
@@ -393,23 +411,16 @@ export function initUpdater(d: UpdaterDeps): void {
   autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.allowPrerelease = false
 
-  // 关掉差量下载（实测踩到的坑）。
+  // 打开差量下载：只下变化的分块，未变的分块从本地缓存的旧安装包复制。
   //
-  // 差量下载的原理：只下载变化的分块，未变的分块从本地旧安装包复制过来。
-  // 听起来划算，但在「高延迟 + 小带宽」的链路上是负收益：
-  //   1. 它会发大量小的 HTTP Range 请求，每个都要等一个完整往返。
-  //      实测到更新服务器的 RTT 是 155 ms，客户端只有约 78 KB/s；
-  //      而同一时刻单流整包下载能到约 580 KB/s（慢 7 倍）。
-  //   2. 更糟的是它会失败并静默重来：实测下到 83 MB 后从 3 MB 重新开始，
-  //      而 electron-updater 不抛 error 事件 —— 用户在界面上只看到进度条倒退。
-  //      对业务同事来说「点了更新等半小时还倒退」比「多下点流量」糟糕得多。
-  //   3. 本次更新的差异本来就大（改了 exe 图标，NSIS 压缩包会级联变化），
-  //      差量并没省下多少。
+  // 之前关掉它，是因为旧更新源链路太差（实测 RTT 155 ms、单流约 78 KB/s）：
+  // 差量会发大量小 Range 请求，每个都等一次完整往返，反而比整包慢约 7 倍；
+  // 还出现过下到 83 MB 后从 3 MB 静默重来的情况（不抛 error，界面只看到进度倒退）。
   //
-  // 改回单流整包下载后：一次请求连续传输，能吃满服务器带宽。
-  // 代价是每次都下完整安装包。以后更新源若换到带宽充足的 COS/CDN，
-  // 可以把这行改回 false 重新评估 —— 那时差量才真正划算。
-  autoUpdater.disableDifferentialDownload = true
+  // 现在更新源已换成国内腾讯云服务器，实测支持 Range（返回 206 Partial Content），
+  // 条件具备，重新打开。若 update.log 里再次出现「下载进度倒退」，说明链路或
+  // 服务器行为变了，把这里改回 true 即可；downloadUpdate 里还有整包兜底重试。
+  autoUpdater.disableDifferentialDownload = false
 
   // 把 electron-updater 的内部日志接到我们自己的 update.log。
   // 不接的话它的失败是完全静默的 —— 上面那个「下载重启」就是因为没日志才难查。
