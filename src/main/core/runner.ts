@@ -6,6 +6,7 @@ import type { WriteStream } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type {
   ActiveRunInfo,
+  RunLogBuffer,
   RunLogEvent,
   RunStartResult,
   RunStatus,
@@ -13,6 +14,7 @@ import type {
   RunUpdateEvent,
   TaskRecord
 } from '@shared/types'
+import { formatLogLine } from '@shared/log-line'
 import { condaPaths } from './conda'
 import type { Db } from './db'
 import { createLineSplitter } from './line-stream'
@@ -56,11 +58,18 @@ interface ActiveRun {
   timeoutTimer: NodeJS.Timeout | null
   /** 区分「超时被杀」与「用户手动停」，两者最终状态不同 */
   killReason: 'timeout' | 'user' | null
-  /** 最近的输出行，用于生成失败摘要 */
+  /** 最近几行输出，用于生成失败摘要 */
   tail: string[]
   /** 这是该任务重试链里的第几次（0 = 首次） */
   attempt: number
+  /** 本次运行已产出的行，按产生顺序排列，供界面补看「打开前已有的输出」 */
+  buffer: string[]
+  /** 已产出的行总数。淘汰后仍保持递增，下标从 0 开始 */
+  seqCount: number
 }
+
+/** 单个 run 在内存里最多保留多少行输出。任务长时间刷日志时只丢最早的部分 */
+const MAX_BUFFERED_LINES = 3000
 
 interface QueueEntry {
   runId: string
@@ -206,6 +215,18 @@ export function isTaskRunning(taskId: string): boolean {
 
 export function findRunByTask(taskId: string): ActiveRunInfo | null {
   return listActiveRuns().find((run) => run.taskId === taskId) ?? null
+}
+
+/**
+ * 取某个正在运行的任务的内存日志缓冲。
+ * firstSeq 是 lines[0] 对应的序号：大于 0 说明更早的输出已被淘汰。
+ */
+export function getRunLogBuffer(runId: string): RunLogBuffer | null {
+  const run = active.get(runId)
+  if (!run) return null
+  const lines = run.buffer.filter(Boolean) as string[]
+  const firstSeq = run.seqCount - lines.length
+  return { firstSeq, lines }
 }
 
 /* ── 启动 ─────────────────────────────────────────── */
@@ -371,16 +392,27 @@ function launch(
     timeoutTimer: null,
     killReason: null,
     tail: [],
-    attempt
+    attempt,
+    buffer: [],
+    seqCount: 0
   }
   active.set(runId, activeRun)
 
   const splitter = createLineSplitter((line) => {
-    log.write(`${line}\n`)
+    // 落盘与实时推送的都是同一份带时间戳的字符串，界面显示和日志文件逐字一致
+    const stamped = formatLogLine(Date.now(), line)
+    log.write(`${stamped}\n`)
     const tail = activeRun.tail
-    tail.push(line)
+    tail.push(stamped)
     if (tail.length > 40) tail.shift()
-    context.onLog({ runId, line })
+    // 序号 = 行数，淘汰后仍递增，界面据此判断某行自己是不是已经有了
+    const seq = activeRun.seqCount
+    activeRun.seqCount += 1
+    activeRun.buffer.push(stamped)
+    if (activeRun.buffer.length > MAX_BUFFERED_LINES) {
+      activeRun.buffer.splice(0, activeRun.buffer.length - MAX_BUFFERED_LINES)
+    }
+    context.onLog({ runId, line: stamped, seq })
   })
 
   child.stdout?.on('data', (chunk: Buffer) => splitter.push(chunk))

@@ -12,6 +12,8 @@ const onlyRunning = ref(false)
 
 const drawerVisible = ref(false)
 const drawerRunId = ref<string | null>(null)
+/** 打开抽屉时一并带上的同任务历史；RunsView 里点「日志」也用同一份 */
+const drawerRuns = ref<RunView[] | null>(null)
 
 let offUpdate: (() => void) | null = null
 /** 运行状态变化可能很密集（每个任务完成都会触发），做个简单节流 */
@@ -45,8 +47,9 @@ async function load(showLoading = true): Promise<void> {
   }
 }
 
-function openLog(runId: string): void {
+function openLog(runId: string, runs: RunView[] | null = null): void {
   drawerRunId.value = runId
+  drawerRuns.value = runs
   drawerVisible.value = true
 }
 
@@ -69,7 +72,8 @@ async function rerun(run: RunView): Promise<void> {
     const result = await window.api.startRun(run.taskId)
     await load(false)
     if (result.note) ElMessage.warning(result.note)
-    openLog(result.run.id)
+    const runs = await window.api.listRuns({ taskId: run.taskId, limit: 50 }).catch(() => [])
+    openLog(result.run.id, runs)
   } catch (err) {
     ElMessage.error(cleanIpcError(err))
   }
@@ -245,7 +249,7 @@ function formatDuration(ms: number | null): string {
       </el-empty>
     </el-card>
 
-    <RunLogDrawer v-model="drawerVisible" :run-id="drawerRunId" />
+    <RunLogDrawer v-model="drawerVisible" :run-id="drawerRunId" :runs="drawerRuns" />
   </div>
 </template>
 

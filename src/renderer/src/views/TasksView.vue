@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { ActiveRunInfo, CondaEnvInfo, ScheduledTaskInfo, TaskView } from '@shared/types'
+import type { ActiveRunInfo, CondaEnvInfo, RunView, ScheduledTaskInfo, TaskView } from '@shared/types'
 import RunLogDrawer from '../components/RunLogDrawer.vue'
 import TaskDialog from '../components/TaskDialog.vue'
 import { cleanIpcError } from '../utils/errors'
@@ -24,6 +24,8 @@ const editingTask = ref<TaskView | null>(null)
 
 const logDrawerVisible = ref(false)
 const logRunId = ref<string | null>(null)
+/** 打开日志抽屉时一并带上的同任务历史，省一次往返；同时让抽屉立刻显示这次新执行 */
+const logHistory = ref<RunView[] | null>(null)
 
 let offRunUpdate: (() => void) | null = null
 
@@ -105,8 +107,10 @@ async function execute(task: TaskView): Promise<void> {
     if (result.note) {
       ElMessage.warning(result.note)
     }
-    // 无论如何都把日志面板打开：跳过/无需启动的情况也要让用户看到原因
-    openLog(result.run.id)
+    // 无论如何都把日志面板打开：跳过/无需启动的情况也要让用户看到原因。
+    // 顺手拉一份历史，左边列表就能立刻列出「这次之前」的每一次执行。
+    const runs = await window.api.listRuns({ taskId: task.id, limit: 50 }).catch(() => [])
+    openLog(task.id, result.run.id, runs)
   } catch (err) {
     ElMessage.error(cleanIpcError(err))
   }
@@ -126,19 +130,21 @@ async function stopTaskRun(task: TaskView): Promise<void> {
   }
 }
 
-function openLog(runId: string): void {
+function openLog(taskId: string, runId: string, runs: RunView[] | null = null): void {
+  logHistory.value = runs
   logRunId.value = runId
   logDrawerVisible.value = true
 }
 
 async function openLatestLog(task: TaskView): Promise<void> {
   try {
-    const runs = await window.api.listRuns({ taskId: task.id, limit: 1 })
+    const runs = await window.api.listRuns({ taskId: task.id, limit: 50 })
     if (runs.length === 0) {
       ElMessage.info('这个任务还没有运行记录')
       return
     }
-    openLog(runs[0].id)
+    // listRuns 已按开始时间倒序，第一条就是最近一次
+    openLog(task.id, runs[0].id, runs)
   } catch (err) {
     ElMessage.error(cleanIpcError(err))
   }
@@ -375,7 +381,7 @@ const stats = computed(() => ({
     </el-card>
 
     <TaskDialog v-model="dialogVisible" :task="editingTask" :envs="envs" :scripts="scripts" @saved="load" />
-    <RunLogDrawer v-model="logDrawerVisible" :run-id="logRunId" />
+    <RunLogDrawer v-model="logDrawerVisible" :run-id="logRunId" :runs="logHistory" />
   </div>
 </template>
 

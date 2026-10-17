@@ -133,11 +133,32 @@ export interface RunStartResult {
 
 export interface RunLogEvent {
   runId: string
+  /** 已经带好时间前缀的整行文本，和写进日志文件的内容逐字一致 */
   line: string
+  /** 这一行在本次运行里的序号（从 0 开始）。界面据此把「打开前已产生的行」跳过，避免重复 */
+  seq: number
 }
 
 export interface RunUpdateEvent {
   run: RunView
+}
+
+/** 读取日志文件的结果；文件超上限时只回尾部 */
+export interface RunLogContent {
+  text: string
+  truncated: boolean
+  totalBytes: number
+}
+
+/**
+ * 某次运行当前驻留在主进程内存里的日志行。
+ * 用来看「已经在跑」的任务：磁盘上的文件要等写入流刷盘才读得到，
+ * 内存缓冲和实时流用的是同一个 slice，不会出现「重复」或「漏行」。
+ */
+export interface RunLogBuffer {
+  /** lines[0] 的序号。大于 0 说明更早的输出已被淘汰，只能去日志文件里翻 */
+  firstSeq: number
+  lines: string[]
 }
 
 /** 正在运行的进程概要，供界面显示与用户手动终止 */

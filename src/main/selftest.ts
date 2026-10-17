@@ -60,6 +60,13 @@ export function runSelfTest(win: BrowserWindow, db: Db): void {
     app.exit(1)
   }, timeoutMs)
 
+  // executeJavaScript 失败时只说「脚本抛了异常」，报错正文全在渲染进程里。
+  // 这里把渲染进程的 console 转出来，自检挂了能直接看到是哪一行。
+  win.webContents.on('console-message', (_event, _level, message, line, sourceId) => {
+    if (message.includes('[selftest]')) return
+    console.error(`[renderer] ${message} (${sourceId}:${line})`)
+  })
+
   win.webContents.once('did-finish-load', () => {
     void (async () => {
       const external = createExternalFixture()
@@ -74,7 +81,13 @@ export function runSelfTest(win: BrowserWindow, db: Db): void {
         app.exit(0)
       } catch (err) {
         clearTimeout(guard)
-        console.error('[selftest] 失败：', err)
+        // executeJavaScript 只给一句「脚本抛了异常」，真正的 message 在渲染进程里。
+        // 探针自己接了异常并写进 window.__selftestError，这里读出来，否则排查时只能瞎猜。
+        const probeError = await win.webContents.executeJavaScript(
+          'window.__selftestError ? String(window.__selftestError) : ""'
+        ).catch(() => '')
+        console.error('[selftest] 失败：', err instanceof Error ? err.message : String(err))
+        if (probeError) console.error('[selftest] 探针内部异常：', probeError)
         stopAll()
         app.exit(1)
       } finally {
@@ -97,6 +110,9 @@ function buildProbe(testEnvName: string | null, external: ExternalFixture): stri
   const externalDir = JSON.stringify(external.dir)
 
   return `(async () => {
+  // 自检失败时把真正的异常挂到 window 上，主进程的 catch 里读回去
+  window.__selftestError = null
+
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
   const waitFor = async (fn, ms) => {
@@ -257,14 +273,15 @@ function buildProbe(testEnvName: string | null, external: ExternalFixture): stri
       const started = await window.api.startRun(reappeared.id)
       const runId = started.run.id
 
-      const liveLines = []
+      const liveEvents = []
       const offLog = window.api.onRunLog((e) => {
-        if (e.runId === runId) liveLines.push(e.line)
+        if (e.runId === runId) liveEvents.push(e)
       })
       const finished = await waitForRun(runId, 60000)
       offLog()
+      const liveLines = liveEvents.map((e) => e.line)
 
-      const logText = await window.api.readRunLog(runId)
+      const logText = (await window.api.readRunLog(runId)).text
 
       runs = {
         started: Boolean(runId),
@@ -272,7 +289,15 @@ function buildProbe(testEnvName: string | null, external: ExternalFixture): stri
         exitCode: finished ? finished.exitCode : null,
         liveLineCount: liveLines.length,
         liveHasChinese: liveLines.some((l) => l.indexOf('你好，RPA_Pilot') >= 0),
+        // 日志行与落盘内容逐字一致，且都带 [HH:mm:ss.SSS] 前缀
+        liveLinesAllStamped:
+          liveLines.length > 0 && liveLines.every((l) => l.indexOf('] ') > 0 && l.indexOf('[') === 0),
+        liveSeqMonotonic: liveEvents.every((e, i) => i === 0 || e.seq > liveEvents[i - 1].seq),
         logHasChinese: logText.indexOf('你好，RPA_Pilot') >= 0,
+        logLinesAllStamped: logText
+          .split(String.fromCharCode(10))
+          .filter((l) => l.length > 0 && l.indexOf('#') !== 0)
+          .every((l) => l.indexOf('] ') >= 0 && l.indexOf('[') === 0),
         logHasHeader: logText.indexOf('# 任务：') >= 0,
         logHasFooter: logText.indexOf('# 状态：success') >= 0,
         logHasVersion: logText.indexOf('Python 版本：3.') >= 0
@@ -291,7 +316,7 @@ function buildProbe(testEnvName: string | null, external: ExternalFixture): stri
       })
       const t = await window.api.startRun(timeoutTask.id)
       const tFinished = await waitForRun(t.run.id, 40000)
-      const tLog = await window.api.readRunLog(t.run.id)
+      const tLog = (await window.api.readRunLog(t.run.id)).text
       runs.timeoutStatus = tFinished ? tFinished.status : 'timeout-waiting'
       runs.timeoutSummary = tFinished ? tFinished.errorSummary : null
       runs.timeoutLogHasTimeout = tLog.indexOf('# 状态：timeout') >= 0
@@ -326,7 +351,7 @@ function buildProbe(testEnvName: string | null, external: ExternalFixture): stri
     if (externalTask) {
       const e = await window.api.startRun(externalTask.id)
       const eFinished = await waitForRun(e.run.id, 60000)
-      const eLog = await window.api.readRunLog(e.run.id)
+      const eLog = (await window.api.readRunLog(e.run.id)).text
 
       runs.externalStatus = eFinished ? eFinished.status : 'timeout-waiting'
       runs.externalExitCode = eFinished ? eFinished.exitCode : null
@@ -485,5 +510,8 @@ function buildProbe(testEnvName: string | null, external: ExternalFixture): stri
       return el && el.textContent ? el.textContent.trim() : null
     }, 8000)
   }
-})()`
+})().catch((e) => {
+  window.__selftestError = (e && e.stack) || String(e)
+  throw e
+})`
 }

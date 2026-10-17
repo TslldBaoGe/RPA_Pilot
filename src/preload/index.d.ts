@@ -6,6 +6,8 @@ import type {
   DbStats,
   EnvCreateOptions,
   EnvCreateProgress,
+  RunLogBuffer,
+  RunLogContent,
   RunLogEvent,
   RunStartResult,
   RunUpdateEvent,
@@ -72,7 +74,9 @@ export interface RpaPilotApi {
   getRun(runId: string): Promise<RunView | null>
   listRuns(options?: { taskId?: string; limit?: number }): Promise<RunView[]>
   /** 读取运行日志；文件较大时只返回尾部 */
-  readRunLog(runId: string): Promise<string>
+  readRunLog(runId: string): Promise<RunLogContent>
+  /** 正在运行的任务：读主进程内存里的输出缓冲，用于补上「打开前已经产生的行」 */
+  readRunLogBuffer(runId: string): Promise<RunLogBuffer | null>
 
   onRunLog(callback: (event: RunLogEvent) => void): () => void
   onRunUpdate(callback: (event: RunUpdateEvent) => void): () => void

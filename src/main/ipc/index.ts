@@ -12,6 +12,8 @@ import type {
   EnvCreateProgress,
   LogCleanupView,
   NotifyTestResult,
+  RunLogBuffer,
+  RunLogContent,
   RunStartResult,
   RunView,
   ScheduledTaskInfo,
@@ -37,7 +39,7 @@ import { readStats } from '../core/db'
 import { cleanupLogs, measureLogs } from '../core/logs'
 import { notifyFailure, sendFeishuText, shouldNotify, showSystemNotification } from '../core/notify'
 import type { ProjectPaths } from '../core/paths'
-import { configureRunner, listActiveRuns, requestRun, stopAll, stopRun, stopTask } from '../core/runner'
+import { configureRunner, getRunLogBuffer, listActiveRuns, requestRun, stopAll, stopRun, stopTask } from '../core/runner'
 import { getRunView, insertRun, listRunViews } from '../core/runs'
 import {
   configureScheduler,
@@ -506,13 +508,13 @@ export function registerIpc(paths: ProjectPaths, db: Db): void {
    * 读取某次运行的日志文件。
    * 大文件只回尾部：日志可能有几百 MB，一次性读进来会把渲染进程撑死。
    */
-  ipcMain.handle('runs:readLog', (_event, runId: unknown): string => {
+  ipcMain.handle('runs:readLog', (_event, runId: unknown): RunLogContent => {
     if (typeof runId !== 'string' || runId.length === 0) throw new Error('缺少运行 id')
 
     const run = getRunView(db, runId)
     if (!run) throw new Error('运行记录不存在')
-    if (!run.logPath) return ''
-    if (!existsSync(run.logPath)) return '（日志文件已不存在）'
+    if (!run.logPath) return { text: '', truncated: false, totalBytes: 0 }
+    if (!existsSync(run.logPath)) return { text: '', truncated: false, totalBytes: 0 }
 
     // 兜底：只允许读项目 logs\ 目录内的文件
     const logFile = resolve(run.logPath)
@@ -524,19 +526,31 @@ export function registerIpc(paths: ProjectPaths, db: Db): void {
 
     const MAX_BYTES = 512 * 1024
     const stat = statSync(logFile)
-    if (stat.size <= MAX_BYTES) return readFileSync(logFile, 'utf8')
+    if (stat.size <= MAX_BYTES) {
+      return { text: readFileSync(logFile, 'utf8'), truncated: false, totalBytes: stat.size }
+    }
 
     const fd = openSync(logFile, 'r')
     try {
       const start = stat.size - MAX_BYTES
       const buffer = Buffer.alloc(MAX_BYTES)
       const read = readSync(fd, buffer, 0, MAX_BYTES, start)
-      return `…（日志共 ${(stat.size / 1024 / 1024).toFixed(1)} MB，此处仅显示最后 ${Math.round(MAX_BYTES / 1024)} KB）\n${buffer
-        .subarray(0, read)
-        .toString('utf8')}`
+      const tail = buffer.subarray(0, read).toString('utf8')
+      const note = `…（日志共 ${(stat.size / 1024 / 1024).toFixed(1)} MB，此处仅显示最后 ${Math.round(MAX_BYTES / 1024)} KB）\n`
+      return { text: note + tail, truncated: true, totalBytes: stat.size }
     } finally {
       closeSync(fd)
     }
+  })
+
+  /**
+   * 正在运行的任务：读主进程内存里的输出缓冲。
+   * 磁盘文件要等写入流刷盘，实时事件又只覆盖打开之后产生的行，
+   * 两边凑起来才能既不漏行也不重复。
+   */
+  ipcMain.handle('runs:logBuffer', (_event, runId: unknown): RunLogBuffer | null => {
+    if (typeof runId !== 'string' || runId.length === 0) throw new Error('缺少运行 id')
+    return getRunLogBuffer(runId)
   })
 
   /* ── 定时调度（M5） ──────────────────────────────── */

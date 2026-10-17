@@ -8,6 +8,8 @@ import type {
   DbStats,
   EnvCreateOptions,
   EnvCreateProgress,
+  RunLogBuffer,
+  RunLogContent,
   RunLogEvent,
   RunStartResult,
   RunUpdateEvent,
@@ -96,7 +98,9 @@ const api = {
   getRun: (runId: string): Promise<RunView | null> => ipcRenderer.invoke('runs:get', runId),
   listRuns: (options?: { taskId?: string; limit?: number }): Promise<RunView[]> =>
     ipcRenderer.invoke('runs:list', options ?? {}),
-  readRunLog: (runId: string): Promise<string> => ipcRenderer.invoke('runs:readLog', runId),
+  readRunLog: (runId: string): Promise<RunLogContent> => ipcRenderer.invoke('runs:readLog', runId),
+  readRunLogBuffer: (runId: string): Promise<RunLogBuffer | null> =>
+    ipcRenderer.invoke('runs:logBuffer', runId),
 
   onRunLog: (callback: (event: RunLogEvent) => void): (() => void) => {
     const listener = (_event: IpcRendererEvent, payload: RunLogEvent): void => callback(payload)
