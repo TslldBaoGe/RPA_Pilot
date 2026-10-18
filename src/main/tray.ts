@@ -1,6 +1,6 @@
 import { Menu, Tray, app } from 'electron'
 import type { BrowserWindow } from 'electron'
-import { resolveTrayIcon } from './icon'
+import { resolveFallbackIcon, resolveTrayIcon } from './icon'
 
 interface TrayOptions {
   getWindow: () => BrowserWindow | null
@@ -37,6 +37,13 @@ export function createTray(options: TrayOptions): Tray {
 
   tray.on('double-click', showWindow)
   tray.on('click', showWindow)
+
+  // 托盘资源缺失时会拿到空图（通知区剩一个空白位），补设 exe 内嵌图标兜底
+  if (icon.isEmpty()) {
+    void resolveFallbackIcon().then((fallback) => {
+      if (fallback) tray.setImage(fallback)
+    })
+  }
 
   return tray
 }

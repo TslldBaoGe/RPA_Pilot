@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { BrowserWindow, shell } from 'electron'
-import { resolveWindowIcon } from './icon'
+import { resolveFallbackIcon, resolveWindowIcon } from './icon'
 import { state } from './state'
 
 export interface WindowOptions {
@@ -35,6 +35,14 @@ export function createMainWindow(options: WindowOptions = {}): BrowserWindow {
   win.on('ready-to-show', () => {
     if (shouldShow) win.show()
   })
+
+  // 资源里的图标没找到时不能让任务栏停在 Electron 默认图标上：
+  // 补设 exe 内嵌的图标（打包时已经编进去，一定是对的）。
+  if (!icon) {
+    void resolveFallbackIcon().then((fallback) => {
+      if (fallback && !win.isDestroyed()) win.setIcon(fallback)
+    })
+  }
 
   // 关窗 = 最小化到托盘。托盘常驻期间定时任务照常触发（设计文档第 8 节）
   win.on('close', (event) => {

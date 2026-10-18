@@ -71,6 +71,27 @@ export function resolveWindowIcon(): string | undefined {
 }
 
 /**
+ * 兜底图标：从「本程序自己的 exe」里取。
+ *
+ * electron-builder 已经把 icon.ico 编进 exe 了，所以哪怕安装目录里的
+ * resources\icon.ico 丢失或损坏，也能拿到机器人图标 —— 而不是像以前那样
+ * 什么都不设，让 Windows 回落到 Electron 默认的原子图标（用户看到的就是
+ * 「任务栏图标变成了 Electron」）。
+ *
+ * app.getFileIcon 是异步的（Windows 上由系统解析文件的关联图标），
+ * 所以只能在窗口/托盘建好之后补设，不能参与构造参数。
+ */
+export async function resolveFallbackIcon(): Promise<Electron.NativeImage | null> {
+  if (!app.isPackaged) return null
+  try {
+    const image = await app.getFileIcon(process.execPath, { size: 'large' })
+    return image.isEmpty() ? null : image
+  } catch {
+    return null
+  }
+}
+
+/**
  * 把图标解析结果写成一行文字，供启动日志记录。
  * 图标加载失败是「静默」的 —— 托盘只会变成一个空白位、任务栏变成 Electron 默认图标，
  * 界面上完全看不出原因。所以启动时把它记进 boot.log，出问题一眼能定位。

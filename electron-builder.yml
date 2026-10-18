@@ -61,6 +61,12 @@ publish:
   url: http://8.134.166.149:8088/
 
 nsis:
+  # 安装向导、卸载器、向导头部图标都显式指向机器人图标。
+  # 不写这几行时靠 electron-builder 的默认推断，一旦推断落空就会显示成
+  # Electron 默认的原子图标（安装/卸载界面、以及任务栏上的安装窗口都会中招）。
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+  installerHeaderIcon: resources/icon.ico
   # 走「可选择的安装向导」，而不是一键静默安装 —— 业务同事需要看到装到哪了
   oneClick: false
   # 按用户安装到 %LOCALAPPDATA%\Programs，无需管理员权限
