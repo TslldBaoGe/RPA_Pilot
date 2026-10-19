@@ -363,6 +363,42 @@ function buildProbe(testEnvName: string | null, external: ExternalFixture): stri
       externalTask = null
     }
 
+    // 5) 自定义解释器：坏路径建任务要被拒；真实解释器要能跑通，且不填环境也允许
+    if (reappeared) {
+      // 探针是模板字符串，反斜杠会被吃掉，路径分隔符用 charCodeAt(92) 拼
+      const BS = String.fromCharCode(92)
+      const badInterpreter = await catchMsg(() =>
+        window.api.createTask({
+          name: '自检任务-坏解释器',
+          scriptPath: '示例_打招呼.py',
+          condaEnv: 'base',
+          interpreterPath: 'D:' + BS + '根本不存在' + BS + 'python.exe',
+          enabled: true
+        })
+      )
+      runs.badInterpreterRejected = Boolean(badInterpreter)
+
+      const condaDir = (condaBefore.condaDir || '').replace(/[/]+$/, '')
+      const customTask = await window.api.createTask({
+        name: '自检任务-自定义解释器',
+        scriptPath: '示例_打招呼.py',
+        // 环境留空 + 自定义解释器：允许，这正是这个能力存在的意义
+        condaEnv: '',
+        interpreterPath: condaDir + BS + 'python.exe',
+        enabled: true
+      })
+      runs.customInterpreterAccepted = Boolean(customTask && customTask.id)
+
+      const c = await window.api.startRun(customTask.id)
+      const cFinished = await waitForRun(c.run.id, 60000)
+      const cLog = (await window.api.readRunLog(c.run.id)).text
+      runs.customInterpreterStatus = cFinished ? cFinished.status : 'timeout-waiting'
+      runs.customInterpreterRan = cLog.indexOf('你好，RPA_Pilot') >= 0
+      runs.customInterpreterMarkedInLog = cLog.indexOf('# 环境：自定义解释器') >= 0
+
+      await window.api.deleteTask(customTask.id)
+    }
+
     /* ── 定时调度链路 ─────────────────────────────
        把示例任务改成每 2 秒触发一次，等它自己跑起来。
        注意 croner 的 6 字段写法第一段是「秒」。 */

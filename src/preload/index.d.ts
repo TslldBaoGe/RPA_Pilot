@@ -48,6 +48,8 @@ export interface RpaPilotApi {
   listScripts(): Promise<string[]>
   /** 弹出文件选择框挑一个 .py（任意本地盘或网络共享路径）；取消时返回 null */
   pickScriptFile(): Promise<{ path: string } | null>
+  /** 选任务级的自定义 Python 解释器（python.exe） */
+  pickInterpreterFile(): Promise<{ path: string } | null>
   /** 即时校验脚本路径：会解析成什么绝对路径、能不能用、是否在工作目录之外 */
   inspectScript(scriptPath: string): Promise<ScriptInspectResult>
   /** 在资源管理器中定位任务的脚本 */

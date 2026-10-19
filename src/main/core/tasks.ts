@@ -24,6 +24,7 @@ interface TaskRow {
   name: string
   script_path: string
   conda_env: string
+  interpreter_path: string | null
   cwd: string | null
   args: string
   cron_expr: string | null
@@ -39,7 +40,7 @@ interface TaskRow {
 }
 
 const SELECT_COLUMNS = `
-  id, name, script_path, conda_env, cwd, args, cron_expr, timezone,
+  id, name, script_path, conda_env, interpreter_path, cwd, args, cron_expr, timezone,
   timeout_sec, overlap_policy, retry_times, notify_on_fail, enabled,
   configured, created_at, updated_at
 `
@@ -64,6 +65,8 @@ function toView(row: TaskRow, paths: ProjectPaths, envNames: Set<string>): TaskV
     scriptExternal: isExternalScript(paths, row.script_path),
     condaEnv: row.conda_env,
     envExists: envNames.has(row.conda_env),
+    interpreterPath: row.interpreter_path,
+    interpreterExists: Boolean(row.interpreter_path) && existsSync(row.interpreter_path as string),
     cwd: row.cwd,
     args,
     cronExpr: row.cron_expr,
@@ -275,6 +278,42 @@ export function normalizeScriptPath(
 }
 
 /**
+ * 校验并归一化自定义解释器路径。
+ *
+ * 填了就必须是**绝对路径** —— 相对路径没有可靠的基准目录（相对工作目录、相对程序、
+ * 相对任务目录都说得通），含糊只会造成「在我机器上能跑」的错觉；
+ * 留空返回 null，表示走 conda 环境。
+ *
+ * requireExists 的语义与 normalizeScriptPath 相同：新建时必须存在，编辑时放宽。
+ */
+export function normalizeInterpreterPath(
+  raw: string | null | undefined,
+  options: NormalizeOptions = {}
+): string | null {
+  const trimmed = (raw ?? '').trim()
+  if (!trimmed) return null
+
+  if (!isAbsolute(trimmed)) {
+    throw new Error(`自定义解释器必须是完整路径（例如 D:\\envs\\py39\\python.exe），收到：${trimmed}`)
+  }
+
+  const abs = resolve(trimmed)
+
+  if (options.requireExists !== false) {
+    let stat: ReturnType<typeof statSync> | null = null
+    try {
+      stat = statSync(abs)
+    } catch {
+      stat = null
+    }
+    if (!stat) throw new Error(`找不到自定义解释器：${abs}`)
+    if (!stat.isFile()) throw new Error(`自定义解释器是一个目录，不是文件：${abs}`)
+  }
+
+  return abs
+}
+
+/**
  * 给界面做即时校验用：用户一边填/选路径，一边告诉他这个路径会怎么被解析、能不能用。
  * 不抛异常，把所有结论放进返回值。
  */
@@ -369,6 +408,7 @@ export function loadTaskRecord(db: Db, id: string): TaskRecord | null {
     name: row.name,
     scriptPath: row.script_path,
     condaEnv: row.conda_env,
+    interpreterPath: row.interpreter_path,
     cwd: row.cwd,
     args,
     cronExpr: row.cron_expr,
@@ -389,7 +429,9 @@ export function createTask(db: Db, envNames: Set<string>, paths: ProjectPaths, i
   assertNameAvailable(db, name)
   // 新建时必须确有其文件，否则会建出一个当场就跑不起来的任务
   const scriptPath = normalizeScriptPath(paths, input.scriptPath, { requireExists: true })
-  const condaEnv = (input.condaEnv || '').trim()
+  const interpreterPath = normalizeInterpreterPath(input.interpreterPath, { requireExists: true })
+  // 填了自定义解释器时环境用不上，DB 列 NOT NULL，落个 'base' 占位即可
+  const condaEnv = (input.condaEnv || '').trim() || (interpreterPath ? 'base' : '')
   if (!condaEnv) throw new Error('必须绑定一个 Python 环境')
 
   const now = new Date().toISOString()
@@ -397,15 +439,16 @@ export function createTask(db: Db, envNames: Set<string>, paths: ProjectPaths, i
 
   db.prepare(`
     INSERT INTO tasks (
-      id, name, script_path, conda_env, cwd, args, cron_expr, timezone,
+      id, name, script_path, conda_env, interpreter_path, cwd, args, cron_expr, timezone,
       timeout_sec, overlap_policy, retry_times, notify_on_fail,
       enabled, configured, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
   `).run(
     id,
     name,
     scriptPath,
     condaEnv,
+    interpreterPath,
     input.cwd?.trim() || null,
     JSON.stringify(input.args ?? []),
     input.cronExpr?.trim() || null,
@@ -438,12 +481,13 @@ export function updateTask(
   assertNameAvailable(db, name, id)
   // 编辑时不强制文件存在：脚本临时被移走时，用户仍要能改名字、改定时这些别的字段
   const scriptPath = normalizeScriptPath(paths, input.scriptPath, { requireExists: false })
-  const condaEnv = (input.condaEnv || '').trim()
+  const interpreterPath = normalizeInterpreterPath(input.interpreterPath, { requireExists: false })
+  const condaEnv = (input.condaEnv || '').trim() || (interpreterPath ? 'base' : '')
   if (!condaEnv) throw new Error('必须绑定一个 Python 环境')
 
   db.prepare(`
     UPDATE tasks SET
-      name = ?, script_path = ?, conda_env = ?, cwd = ?, args = ?,
+      name = ?, script_path = ?, conda_env = ?, interpreter_path = ?, cwd = ?, args = ?,
       cron_expr = ?, timezone = ?, timeout_sec = ?, overlap_policy = ?,
       retry_times = ?, notify_on_fail = ?, enabled = ?, configured = 1,
       updated_at = ?
@@ -452,6 +496,7 @@ export function updateTask(
     name,
     scriptPath,
     condaEnv,
+    interpreterPath,
     input.cwd?.trim() || null,
     JSON.stringify(input.args ?? []),
     input.cronExpr?.trim() || null,

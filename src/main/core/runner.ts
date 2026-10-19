@@ -159,23 +159,41 @@ function buildTaskEnv(task: TaskRecord, condaDir: string | null): NodeJS.Process
   return env
 }
 
+/**
+ * 自定义解释器的环境变量。
+ * 不注入 conda 那套 PATH（只对 conda 环境有意义），只把解释器自己的目录
+ * 放到最前面：venv 的 python 会自己找同环境的包，但脚本里若再起 `python`
+ * 子进程，解析到的也是同一个解释器。
+ */
+function buildCustomInterpreterEnv(pythonPath: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    // 不设 PYTHONIOENCODING 的话，Windows 下中文输出按 GBK 编码，读出来就是乱码
+    PYTHONIOENCODING: 'utf-8',
+    // 不设 PYTHONUNBUFFERED 的话，日志要等进程结束才一次性吐出来，看不到实时输出
+    PYTHONUNBUFFERED: '1',
+    PYTHONUTF8: '1'
+  }
+
+  const dir = dirname(pythonPath)
+  env.PATH = `${dir};${process.env.PATH ?? ''}`
+  return env
+}
+
+interface RunTarget {
+  pythonPath: string
+  scriptAbs: string
+  cwd: string
+  env: NodeJS.ProcessEnv
+  /** true = 用的是任务里自定义的解释器，而不是 conda 环境 */
+  customInterpreter: boolean
+}
+
 function resolveRunTarget(
   paths: ProjectPaths,
   task: TaskRecord,
   condaDir: string | null
-): { pythonPath: string; scriptAbs: string; cwd: string; env: NodeJS.ProcessEnv } {
-  if (!condaDir) {
-    throw new Error('尚未指定 Miniconda 位置，请先到「运行环境」页面选择')
-  }
-
-  const root = condaPaths(condaDir)
-  const envDir = !task.condaEnv || task.condaEnv === 'base' ? root.dir : join(root.envsDir, task.condaEnv)
-  const pythonPath = join(envDir, 'python.exe')
-
-  if (!existsSync(pythonPath)) {
-    throw new Error(`环境「${task.condaEnv || 'base'}」的解释器不存在：${pythonPath}`)
-  }
-
+): RunTarget {
   // 脚本可能是工作目录内的（相对路径），也可能是用户自己指定的外部/网络路径（绝对路径）
   const scriptAbs = resolveScriptPath(paths, task.scriptPath)
   if (!existsSync(scriptAbs)) {
@@ -193,7 +211,36 @@ function resolveRunTarget(
     cwd = candidate
   }
 
-  return { pythonPath, scriptAbs, cwd, env: buildTaskEnv(task, condaDir) }
+  // 自定义解释器优先：不同的任务可以用不同的 Python（如项目自带的 venv），
+  // 且不要求本机配置过 Miniconda
+  const custom = (task.interpreterPath ?? '').trim()
+  if (custom) {
+    const pythonPath = resolve(custom)
+    if (!existsSync(pythonPath)) {
+      throw new Error(`自定义解释器不存在：${pythonPath}`)
+    }
+    return {
+      pythonPath,
+      scriptAbs,
+      cwd,
+      env: buildCustomInterpreterEnv(pythonPath),
+      customInterpreter: true
+    }
+  }
+
+  if (!condaDir) {
+    throw new Error('尚未指定 Miniconda 位置，请先到「运行环境」页面选择')
+  }
+
+  const root = condaPaths(condaDir)
+  const envDir = !task.condaEnv || task.condaEnv === 'base' ? root.dir : join(root.envsDir, task.condaEnv)
+  const pythonPath = join(envDir, 'python.exe')
+
+  if (!existsSync(pythonPath)) {
+    throw new Error(`环境「${task.condaEnv || 'base'}」的解释器不存在：${pythonPath}`)
+  }
+
+  return { pythonPath, scriptAbs, cwd, env: buildTaskEnv(task, condaDir), customInterpreter: false }
 }
 
 /* ── 对外查询 ─────────────────────────────────────── */
@@ -331,7 +378,7 @@ function launch(
   const header = [
     `# 任务：${task.name}`,
     `# 脚本：${target.scriptAbs}`,
-    `# 环境：${task.condaEnv || 'base'}`,
+    `# 环境：${target.customInterpreter ? '自定义解释器' : task.condaEnv || 'base'}`,
     `# 解释器：${target.pythonPath}`,
     `# 工作目录：${target.cwd}`,
     `# 触发：${trigger === 'schedule' ? '定时' : '手动'}${attempt > 0 ? `（第 ${attempt} 次重试）` : ''}`,

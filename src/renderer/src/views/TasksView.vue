@@ -291,7 +291,8 @@ interface RowStatus {
 function rowStatus(task: TaskView): RowStatus {
   if (isRunning(task)) return { text: '运行中', type: 'primary' }
   if (!task.scriptExists) return { text: '脚本缺失', type: 'danger' }
-  if (!task.envExists) return { text: '环境缺失', type: 'danger' }
+  if (task.interpreterPath && !task.interpreterExists) return { text: '解释器缺失', type: 'danger' }
+  if (!task.interpreterPath && !task.envExists) return { text: '环境缺失', type: 'danger' }
   if (!task.configured) return { text: '待配置', type: 'warning' }
   return { text: '正常', type: 'success' }
 }
@@ -300,7 +301,9 @@ const stats = computed(() => ({
   total: tasks.value.length,
   running: activeRuns.value.length,
   unconfigured: tasks.value.filter((t) => t.scriptExists && !t.configured).length,
-  broken: tasks.value.filter((t) => !t.scriptExists || !t.envExists).length
+  broken: tasks.value.filter(
+    (t) => !t.scriptExists || (t.interpreterPath ? !t.interpreterExists : !t.envExists)
+  ).length
 }))
 </script>
 
@@ -391,9 +394,14 @@ const stats = computed(() => ({
           </template>
         </el-table-column>
 
-        <el-table-column label="Python 环境" width="130">
+        <el-table-column label="Python 环境" width="140">
           <template #default="{ row }">
-            <span :class="{ 'text-danger': !row.envExists }">{{ row.condaEnv || '未绑定' }}</span>
+            <template v-if="row.interpreterPath">
+              <el-tag size="small" type="warning" effect="plain">自定义</el-tag>
+              <div class="interp-path" :title="row.interpreterPath">{{ row.interpreterPath }}</div>
+              <div v-if="!row.interpreterExists" class="tiny text-danger">解释器缺失</div>
+            </template>
+            <span v-else :class="{ 'text-danger': !row.envExists }">{{ row.condaEnv || '未绑定' }}</span>
           </template>
         </el-table-column>
 
@@ -597,6 +605,17 @@ const stats = computed(() => ({
 .tiny {
   font-size: 11.5px;
   line-height: 1.5;
+}
+
+.interp-path {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #4e5969;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 132px;
 }
 
 .empty-text {

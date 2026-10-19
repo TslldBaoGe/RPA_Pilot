@@ -67,6 +67,8 @@ const api = {
   listScripts: (): Promise<string[]> => ipcRenderer.invoke('tasks:scripts'),
   /** 弹出文件选择框挑一个 .py（任意本地盘或网络共享路径） */
   pickScriptFile: (): Promise<{ path: string } | null> => ipcRenderer.invoke('dialog:pickScript'),
+  pickInterpreterFile: (): Promise<{ path: string } | null> =>
+    ipcRenderer.invoke('dialog:pickInterpreter'),
   /** 即时校验脚本路径，用于界面反馈 */
   inspectScript: (scriptPath: string): Promise<ScriptInspectResult> =>
     ipcRenderer.invoke('tasks:inspectScript', scriptPath),

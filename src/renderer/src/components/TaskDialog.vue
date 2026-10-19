@@ -19,6 +19,7 @@ interface FormState {
   name: string
   scriptPath: string
   condaEnv: string
+  interpreterPath: string
   cwd: string
   argsText: string
   cronExpr: string
@@ -99,6 +100,18 @@ async function browseScript(): Promise<void> {
 /** 从工作目录里快速选一个已扫描到的脚本 */
 const quickPick = ref('')
 
+/** 填了自定义解释器时，conda 环境就只是备用，不再强制选择 */
+const hasCustomInterpreter = computed(() => form.interpreterPath.trim().length > 0)
+
+async function browseInterpreter(): Promise<void> {
+  try {
+    const picked = await window.api.pickInterpreterFile()
+    if (picked) form.interpreterPath = picked.path
+  } catch (err) {
+    ElMessage.error(cleanIpcError(err))
+  }
+}
+
 function onQuickPick(value: string): void {
   if (!value) return
   form.scriptPath = value
@@ -147,6 +160,7 @@ function emptyForm(): FormState {
     name: '',
     scriptPath: '',
     condaEnv: 'base',
+    interpreterPath: '',
     cwd: '',
     argsText: '',
     cronExpr: '',
@@ -172,6 +186,7 @@ watch(visible, (open) => {
     form.name = task.name
     form.scriptPath = task.scriptPath
     form.condaEnv = task.condaEnv
+    form.interpreterPath = task.interpreterPath ?? ''
     form.cwd = task.cwd ?? ''
     form.argsText = task.args.join('\n')
     form.cronExpr = task.cronExpr ?? ''
@@ -200,8 +215,8 @@ async function submit(): Promise<void> {
     ElMessage.warning(`脚本路径有问题：${scriptProblem.value}`)
     return
   }
-  if (!form.condaEnv) {
-    ElMessage.warning('请选择 Python 环境')
+  if (!form.condaEnv && !hasCustomInterpreter.value) {
+    ElMessage.warning('请选择 Python 环境，或填写自定义解释器')
     return
   }
 
@@ -209,6 +224,7 @@ async function submit(): Promise<void> {
     name: form.name.trim(),
     scriptPath: form.scriptPath,
     condaEnv: form.condaEnv,
+    interpreterPath: form.interpreterPath.trim() || null,
     cwd: form.cwd.trim() || null,
     // 每行一个参数：这样带空格的参数不会被错误拆分
     args: form.argsText
@@ -292,10 +308,35 @@ async function submit(): Promise<void> {
         </div>
       </el-form-item>
 
-      <el-form-item label="Python 环境" required>
-        <el-select v-model="form.condaEnv" placeholder="选择环境" class="full">
+      <el-form-item label="Python 环境" :required="!hasCustomInterpreter">
+        <el-select
+          v-model="form.condaEnv"
+          placeholder="选择环境"
+          class="full"
+          :disabled="hasCustomInterpreter"
+        >
           <el-option v-for="env in envs" :key="env.name" :label="env.name" :value="env.name" />
         </el-select>
+        <div v-if="hasCustomInterpreter" class="field-block-hint">
+          已填自定义解释器，运行时不再使用这个环境
+        </div>
+      </el-form-item>
+
+      <el-form-item label="自定义解释器">
+        <div class="script-block">
+          <el-input
+            v-model="form.interpreterPath"
+            placeholder="可选：填 python.exe 的完整路径，不同的任务可以用不同的 Python"
+            clearable
+          >
+            <template #append>
+              <el-button @click="browseInterpreter">浏览…</el-button>
+            </template>
+          </el-input>
+          <div class="field-block-hint">
+            适合项目自带虚拟环境（venv）的场景：填了这一项就优先用它，上面的环境只在留空时生效。
+          </div>
+        </div>
       </el-form-item>
 
       <el-form-item label="工作目录">

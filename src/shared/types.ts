@@ -16,6 +16,12 @@ export interface TaskRecord {
   scriptPath: string
   /** 项目自带 Miniconda 下的环境名 */
   condaEnv: string
+  /**
+   * 自定义 Python 解释器的完整路径（如 D:\proj\venv\Scripts\python.exe）。
+   * 非空时优先于 condaEnv —— 不同的任务可以用不同的 Python，不受 Miniconda 约束；
+   * null 表示走 condaEnv 指向的环境。
+   */
+  interpreterPath: string | null
   cwd: string | null
   args: string[]
   /** cron 表达式；null 表示仅手动执行 */
@@ -41,6 +47,8 @@ export interface TaskView extends TaskRecord {
   scriptExternal: boolean
   /** 绑定的 conda 环境是否还存在 */
   envExists: boolean
+  /** 自定义解释器文件是否还存在；未设置自定义解释器时为 false */
+  interpreterExists: boolean
 }
 
 /** 新建/更新任务的入参 */
@@ -54,6 +62,8 @@ export interface TaskInput {
    */
   scriptPath: string
   condaEnv: string
+  /** 可选：自定义 Python 解释器的完整路径；填写后优先于 condaEnv */
+  interpreterPath?: string | null
   cwd?: string | null
   args?: string[]
   cronExpr?: string | null

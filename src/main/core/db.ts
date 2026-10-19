@@ -67,6 +67,13 @@ const MIGRATIONS: Migration[] = [
     statements: `
       ALTER TABLE tasks ADD COLUMN configured INTEGER NOT NULL DEFAULT 0;
     `
+  },
+  {
+    // 每个任务可以单独指定 Python 解释器（如项目自带的 venv），null = 走 conda 环境
+    version: 3,
+    statements: `
+      ALTER TABLE tasks ADD COLUMN interpreter_path TEXT;
+    `
   }
 ]
 

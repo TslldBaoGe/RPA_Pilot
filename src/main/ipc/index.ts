@@ -362,6 +362,21 @@ export function registerIpc(paths: ProjectPaths, db: Db): void {
     return { path: result.filePaths[0] }
   })
 
+  /** 选一个自定义 Python 解释器（python.exe），任意位置 —— 任务级的，覆盖全局 conda 环境 */
+  ipcMain.handle('dialog:pickInterpreter', async (): Promise<{ path: string } | null> => {
+    const result = await dialog.showOpenDialog({
+      title: '选择这个任务使用的 Python 解释器（python.exe）',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Python 解释器', extensions: ['exe'] },
+        { name: '全部文件', extensions: ['*'] }
+      ]
+    })
+
+    if (result.canceled || result.filePaths.length === 0) return null
+    return { path: result.filePaths[0] }
+  })
+
   /** 即时校验用户填/选的脚本路径：界面用来提示「能不能跑」「会怎么存」 */
   ipcMain.handle('tasks:inspectScript', (_event, raw: unknown): ScriptInspectResult =>
     inspectScript(paths, typeof raw === 'string' ? raw : '')
