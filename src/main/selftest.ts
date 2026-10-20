@@ -143,6 +143,8 @@ function buildProbe(testEnvName: string | null, external: ExternalFixture): stri
   const info = await window.api.getAppInfo()
   const stats = await window.api.getDbStats()
   const condaBefore = await window.api.getCondaStatus()
+  // git 集成是可选能力：只要 IPC 链路通、字段类型对就行，目录本身未必是仓库
+  const gitSummary = await window.api.gitSummary()
 
   /* ── 任务管理链路 ───────────────────────────── */
 
@@ -537,6 +539,11 @@ function buildProbe(testEnvName: string | null, external: ExternalFixture): stri
     runs,
     delivery,
     runCountAfter: (await window.api.listRuns({ limit: 500 })).length,
+    gitSummary: {
+      gitAvailable: gitSummary.gitAvailable,
+      isRepo: typeof gitSummary.isRepo === 'boolean',
+      branch: gitSummary.branch
+    },
     electron: info.versions.electron,
     journalMode: stats.journalMode,
     apiBridge: typeof window.api.openPath,

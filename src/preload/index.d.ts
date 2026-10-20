@@ -6,6 +6,8 @@ import type {
   DbStats,
   EnvCreateOptions,
   EnvCreateProgress,
+  GitPullResult,
+  GitSummary,
   RunLogBuffer,
   RunLogContent,
   RunLogEvent,
@@ -66,6 +68,11 @@ export interface RpaPilotApi {
   deleteTask(id: string): Promise<{ ok: true }>
   /** 只切换启用状态，不会把「待配置」任务标记为已配置 */
   setTaskEnabled(id: string, enabled: boolean): Promise<TaskView>
+
+  /** 任务目录的 git 概况；不是仓库时 isRepo 为 false（可选能力，界面据此隐藏入口） */
+  gitSummary(): Promise<GitSummary>
+  /** 在任务目录里手动执行 git pull --ff-only */
+  gitPull(): Promise<GitPullResult>
 
   /** 立即执行；返回的运行可能是 skipped / queued（取决于并发策略） */
   startRun(taskId: string): Promise<RunStartResult>

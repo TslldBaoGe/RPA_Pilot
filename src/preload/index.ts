@@ -8,6 +8,8 @@ import type {
   DbStats,
   EnvCreateOptions,
   EnvCreateProgress,
+  GitPullResult,
+  GitSummary,
   RunLogBuffer,
   RunLogContent,
   RunLogEvent,
@@ -69,6 +71,8 @@ const api = {
   pickScriptFile: (): Promise<{ path: string } | null> => ipcRenderer.invoke('dialog:pickScript'),
   pickInterpreterFile: (): Promise<{ path: string } | null> =>
     ipcRenderer.invoke('dialog:pickInterpreter'),
+  gitSummary: (): Promise<GitSummary> => ipcRenderer.invoke('git:summary'),
+  gitPull: (): Promise<GitPullResult> => ipcRenderer.invoke('git:pull'),
   /** 即时校验脚本路径，用于界面反馈 */
   inspectScript: (scriptPath: string): Promise<ScriptInspectResult> =>
     ipcRenderer.invoke('tasks:inspectScript', scriptPath),

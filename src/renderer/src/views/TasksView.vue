@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type {
   ActiveRunInfo,
   CondaEnvInfo,
+  GitSummary,
   RunView,
   ScheduledTaskInfo,
   TaskView
@@ -28,6 +29,10 @@ const condaReady = ref(false)
 const loading = ref(true)
 const syncing = ref(false)
 const loadError = ref<string | null>(null)
+
+/** 任务目录的 git 概况；不是仓库时整个入口都不显示（可选能力） */
+const gitInfo = ref<GitSummary | null>(null)
+const pulling = ref(false)
 
 const dialogVisible = ref(false)
 const editingTask = ref<TaskView | null>(null)
@@ -60,13 +65,14 @@ async function load(): Promise<void> {
   loading.value = true
   loadError.value = null
   try {
-    const [taskList, conda, scriptList, active, scheduleList, recentRuns] = await Promise.all([
+    const [taskList, conda, scriptList, active, scheduleList, recentRuns, git] = await Promise.all([
       window.api.listTasks(),
       window.api.getCondaStatus(),
       window.api.listScripts(),
       window.api.listActiveRuns(),
       window.api.getScheduledTasks(),
-      window.api.listRuns({ limit: 300 })
+      window.api.listRuns({ limit: 300 }),
+      window.api.gitSummary()
     ])
     tasks.value = taskList
     envs.value = conda.envs
@@ -74,6 +80,7 @@ async function load(): Promise<void> {
     scripts.value = scriptList
     activeRuns.value = active
     scheduled.value = scheduleList
+    gitInfo.value = git
     // listRuns 按开始时间倒序，同一任务取到第一条就是最近一次
     const map: Record<string, RunView> = {}
     for (const run of recentRuns) {
@@ -109,6 +116,54 @@ async function scan(): Promise<void> {
     ElMessage.error(cleanIpcError(err))
   } finally {
     syncing.value = false
+  }
+}
+
+/** 任务目录是 git 仓库时按钮的悬浮提示 */
+const gitButtonTitle = computed(() => {
+  const info = gitInfo.value
+  if (!info?.isRepo) return ''
+  const parts = [`分支 ${info.branch ?? '未知'}`]
+  if (info.lastCommit) parts.push(`最新提交 ${info.lastCommit}`)
+  if (info.remoteUrl) parts.push(info.remoteUrl)
+  return parts.join('\n')
+})
+
+/**
+ * 手动从 Git 拉取任务脚本的最新提交。
+ * 成功后顺手扫一遍目录：pull 下来的新脚本要重新登记才会出现在列表里。
+ */
+async function pullFromGit(): Promise<void> {
+  pulling.value = true
+  try {
+    const result = await window.api.gitPull()
+    const output = result.output.trim()
+
+    if (result.ok) {
+      if (/already up to date/i.test(output)) {
+        ElMessage.info('Git 已是最新，没有需要拉取的提交')
+      } else {
+        ElMessage.success('已从 Git 更新任务脚本')
+        if (output) {
+          await ElMessageBox.alert(output, 'Git 更新结果', {
+            confirmButtonText: '知道了',
+            customStyle: { whiteSpace: 'pre-wrap', maxWidth: '640px' }
+          })
+        }
+      }
+      await scan()
+    } else {
+      await ElMessageBox.alert(output || '更新失败', 'Git 更新失败', {
+        confirmButtonText: '知道了',
+        customStyle: { whiteSpace: 'pre-wrap', maxWidth: '640px' }
+      })
+    }
+
+    gitInfo.value = await window.api.gitSummary()
+  } catch (err) {
+    ElMessage.error(cleanIpcError(err))
+  } finally {
+    pulling.value = false
   }
 }
 
@@ -317,6 +372,14 @@ const stats = computed(() => ({
         </p>
       </div>
       <div class="header-actions">
+        <el-tooltip
+          v-if="gitInfo?.isRepo"
+          :content="gitButtonTitle"
+          placement="top"
+          :show-after="300"
+        >
+          <el-button :loading="pulling" @click="pullFromGit">从 Git 更新</el-button>
+        </el-tooltip>
         <el-button :loading="syncing" @click="scan">扫描 tasks\ 目录</el-button>
         <el-button type="primary" @click="openCreate">新建任务</el-button>
       </div>

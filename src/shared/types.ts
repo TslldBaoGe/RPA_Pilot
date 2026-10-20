@@ -102,6 +102,22 @@ export interface TaskSyncResult {
   scripts: string[]
 }
 
+/* ── Git 集成（任务脚本目录，可选能力） ────────────── */
+
+/** 任务目录的 git 概况；不是仓库或没装 git 时 isRepo 为 false，界面据此隐藏入口 */
+export interface GitSummary {
+  gitAvailable: boolean
+  isRepo: boolean
+  branch: string | null
+  lastCommit: string | null
+  remoteUrl: string | null
+}
+
+export interface GitPullResult {
+  ok: boolean
+  output: string
+}
+
 export type RunTrigger = 'manual' | 'schedule'
 
 export type RunStatus =

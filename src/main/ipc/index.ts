@@ -12,6 +12,8 @@ import type {
   EnvCreateProgress,
   LogCleanupView,
   NotifyTestResult,
+  GitPullResult,
+  GitSummary,
   RunLogBuffer,
   RunLogContent,
   RunStartResult,
@@ -36,6 +38,7 @@ import {
 import type { CondaResolution } from '../core/conda'
 import type { Db } from '../core/db'
 import { readStats } from '../core/db'
+import { pullGitRepo, readGitSummary } from '../core/git'
 import { cleanupLogs, measureLogs } from '../core/logs'
 import { notifyFailure, sendFeishuText, shouldNotify, showSystemNotification } from '../core/notify'
 import type { ProjectPaths } from '../core/paths'
@@ -417,6 +420,17 @@ export function registerIpc(paths: ProjectPaths, db: Db): void {
    * 和 shell:showScript 同理，这里只是打开一个目录，不读内容。
    */
   ipcMain.handle('tasks:openDir', async (): Promise<string> => shell.openPath(paths.tasksDir))
+
+  /* ── Git 集成（任务脚本目录，可选能力） ──────────── */
+
+  /** 任务目录是不是 git 仓库；是的话界面才显示「从 Git 更新」入口 */
+  ipcMain.handle('git:summary', (): GitSummary => readGitSummary(paths.tasksDir))
+
+  /**
+   * 手动拉取任务脚本项目的最新提交。
+   * 刻意只做 pull、不做任何自动动作：更新完要不要重新扫描登记，由界面在成功后触发。
+   */
+  ipcMain.handle('git:pull', async (): Promise<GitPullResult> => pullGitRepo(paths.tasksDir))
 
   ipcMain.handle('tasks:create', (_event, raw: unknown): TaskView => {
     const created = createTask(db, envNames(), paths, asTaskInput(raw))
