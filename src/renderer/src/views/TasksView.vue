@@ -747,14 +747,14 @@ const stats = computed(() => ({
 }
 
 .soft-blue {
-  background: #dbe4ff;
-  color: #2a4ec2;
+  background: #c6d3ff;
+  color: #1c39a6;
 }
 
 .soft-blue:hover,
 .soft-blue:focus {
-  background: #cdd9ff;
-  color: #1d3da8;
+  background: #b5c6ff;
+  color: #142f8f;
 }
 
 .soft-gray {
