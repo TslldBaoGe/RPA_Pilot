@@ -43,11 +43,16 @@ const updateBadge = computed(() => {
 
 <template>
   <el-container class="shell">
-    <el-aside width="196px" class="aside">
+    <el-aside width="208px" class="aside">
       <div class="brand">
         <img :src="logoUrl" class="brand-logo" alt="RPA_Pilot" />
-        <span class="brand-name">RPA_Pilot</span>
+        <div class="brand-text">
+          <span class="brand-name">RPA_Pilot</span>
+          <span class="brand-sub">本地任务中枢</span>
+        </div>
       </div>
+
+      <div class="nav-caption">工作台</div>
 
       <el-menu :default-active="activeIndex" router class="menu">
         <el-menu-item index="/tasks">任务管理</el-menu-item>
@@ -60,14 +65,14 @@ const updateBadge = computed(() => {
       </el-menu>
 
       <div class="aside-footer">
-        <div v-if="updateBadge" class="update-tip">
-          <el-tag size="small" :type="updateBadge.type" effect="dark">{{ updateBadge.text }}</el-tag>
+        <div v-if="updateBadge" class="update-banner" :class="updateBadge.type">
+          {{ updateBadge.text }}
         </div>
         <div class="meta-line">
-          <el-tag size="small" type="info" effect="plain">v{{ info?.appVersion ?? '—' }}</el-tag>
-          <el-tag v-if="info" size="small" :type="info.isDev ? 'warning' : 'success'" effect="plain">
+          <span class="chip">v{{ info?.appVersion ?? '—' }}</span>
+          <span v-if="info" class="chip" :class="info.isDev ? 'warn' : 'ok'">
             {{ info.isDev ? '开发' : '生产' }}
-          </el-tag>
+          </span>
         </div>
       </div>
     </el-aside>
@@ -83,44 +88,92 @@ const updateBadge = computed(() => {
   height: 100%;
 }
 
+/* 深色侧栏：整个界面的「高级感」主要来自这里 —— 深海军蓝渐变 + 品牌色高亮 */
 .aside {
   display: flex;
   flex-direction: column;
-  background: #ffffff;
-  border-right: 1px solid #e8eaed;
-  padding: 16px 0 12px;
+  background: linear-gradient(180deg, #111a33 0%, #0c142b 100%);
+  padding: 18px 0 14px;
   overflow: hidden;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 18px 16px;
+  gap: 10px;
+  padding: 0 20px 16px;
 }
 
 .brand-logo {
   /* 和 app 图标同一枚图（由 scripts/make-icons.py 一并输出到这里） */
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   display: block;
-  border-radius: 7px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px -4px rgba(64, 108, 255, 0.6);
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
 }
 
 .brand-name {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.3px;
+  color: #f4f7ff;
+}
+
+.brand-sub {
+  font-size: 11px;
+  color: #7d8ab0;
+  letter-spacing: 1px;
+}
+
+.nav-caption {
+  padding: 2px 22px 8px;
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: #5d6a8f;
 }
 
 .menu {
   border-right: none;
   flex: 1;
+  background: transparent;
+  padding: 0 10px;
+
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: #97a3c4;
+  --el-menu-active-color: #ffffff;
+  --el-menu-hover-bg-color: rgba(255, 255, 255, 0.07);
+}
+
+.menu :deep(.el-menu-item) {
+  height: 42px;
+  line-height: 42px;
+  margin: 3px 0;
+  border-radius: 10px;
+  font-size: 13.5px;
+  transition: background 0.15s ease;
+}
+
+.menu :deep(.el-menu-item:hover) {
+  background: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+}
+
+.menu :deep(.el-menu-item.is-active) {
+  background: linear-gradient(135deg, #406cff 0%, #5d8bff 100%);
+  color: #ffffff;
+  box-shadow: 0 8px 20px -8px rgba(64, 108, 255, 0.85);
 }
 
 .aside-footer {
-  padding: 12px 18px 0;
-  border-top: 1px solid #f0f1f3;
+  padding: 14px 20px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .meta-line {
@@ -128,8 +181,47 @@ const updateBadge = computed(() => {
   gap: 6px;
 }
 
-.update-tip {
-  margin-bottom: 8px;
+/* 深底上的小徽章：半透明底 + 描边，比默认 el-tag 通透 */
+.chip {
+  font-size: 11px;
+  line-height: 1;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: #aab4d4;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chip.ok {
+  color: #7ee2ae;
+  background: rgba(47, 191, 113, 0.14);
+  border-color: rgba(47, 191, 113, 0.28);
+}
+
+.chip.warn {
+  color: #ffd27a;
+  background: rgba(245, 165, 36, 0.14);
+  border-color: rgba(245, 165, 36, 0.3);
+}
+
+.update-banner {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.update-banner.warning {
+  color: #ffd27a;
+  background: rgba(245, 165, 36, 0.14);
+  border: 1px solid rgba(245, 165, 36, 0.3);
+}
+
+.update-banner.success {
+  color: #7ee2ae;
+  background: rgba(47, 191, 113, 0.14);
+  border: 1px solid rgba(47, 191, 113, 0.28);
 }
 
 /* 菜单项右侧的小圆点：只用一个点提示，不抢注意力 */
@@ -142,11 +234,11 @@ const updateBadge = computed(() => {
 }
 
 .menu-dot.warning {
-  background: #e6a23c;
+  background: #f5a524;
 }
 
 .menu-dot.success {
-  background: #67c23a;
+  background: #2fbf71;
 }
 
 .main {

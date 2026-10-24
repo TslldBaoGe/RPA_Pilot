@@ -22,7 +22,7 @@ export function createMainWindow(options: WindowOptions = {}): BrowserWindow {
     // 不设的话任务栏会是 Electron 默认的原子图标
     ...(icon ? { icon } : {}),
     autoHideMenuBar: true,
-    backgroundColor: '#f5f7fa',
+    backgroundColor: '#f4f6fb',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       // preload 里不引入 node 模块，但保留 sandbox:false 以便后续扩展

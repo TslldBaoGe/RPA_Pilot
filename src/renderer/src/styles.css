@@ -1,3 +1,43 @@
+/* ══════════════════════════════════════════════════════════
+   RPA_Pilot 全局主题
+   一套令牌管全局：改这里的变量，整套界面跟着变
+   ══════════════════════════════════════════════════════════ */
+
+/* ── 设计令牌 & Element Plus 变量覆盖 ─────────────────── */
+:root {
+  /* 品牌蓝：沿用机器人主色，配齐整阶衍生色（按钮 hover/禁用、边框、浅底都靠它们） */
+  --el-color-primary: #406cff;
+  --el-color-primary-light-3: #6e8bff;
+  --el-color-primary-light-5: #9fb1ff;
+  --el-color-primary-light-7: #c6d2ff;
+  --el-color-primary-light-8: #dbe2ff;
+  --el-color-primary-light-9: #edf1ff;
+  --el-color-primary-dark-2: #3356cc;
+
+  --el-color-success: #2fbf71;
+  --el-color-warning: #f5a524;
+  --el-color-danger: #f04438;
+  --el-color-error: #f04438;
+  --el-color-info: #667085;
+
+  --el-text-color-primary: #1b2233;
+  --el-text-color-regular: #3c4457;
+  --el-text-color-secondary: #667085;
+
+  --el-border-radius-base: 8px;
+  --el-border-color: #e4e7ee;
+  --el-border-color-light: #eceef3;
+  --el-border-color-lighter: #f0f2f6;
+
+  /* 应用自己的令牌 */
+  --rp-bg: #f4f6fb;
+  --rp-line: #eceef3;
+  --rp-muted: #7a8190;
+  --rp-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 10px 28px -14px rgba(16, 24, 40, 0.14);
+  --rp-shadow-pop: 0 16px 48px -12px rgba(16, 24, 40, 0.26);
+}
+
+/* ── 基底 ──────────────────────────────────────────── */
 * {
   box-sizing: border-box;
 }
@@ -13,11 +53,18 @@ body,
 body {
   font-family: 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', system-ui, sans-serif;
   font-size: 14px;
-  color: #1f2329;
-  background: #f5f7fa;
+  color: var(--el-text-color-primary);
+  background: var(--rp-bg);
   /* 桌面应用：禁止整页选中与拖拽，更像原生客户端 */
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* 内容区带一丝品牌色的顶部光晕，去掉「一块灰底」的廉价感 */
+#app {
+  background:
+    radial-gradient(1100px 380px at 82% -8%, rgba(64, 108, 255, 0.07), transparent 62%),
+    var(--rp-bg);
 }
 
 code,
@@ -27,5 +74,171 @@ code,
   user-select: text;
 }
 
-/* 主体内容超出时出现正常滚动条（滚动容器就是 .page，见各视图）。
-   对话框 / 抽屉内部自己的小滚动区保持不变 —— 那是浮层，本来就该独立滚。 */
+/* ── 滚动条：细、圆、浅，不抢戏 ─────────────────────── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d3d7e0;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #bac0cd;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── 页面骨架（各视图共用同名 class，这里统一精修；
+      带 #app 前缀是为了压过视图里的 scoped 同名规则） ── */
+#app .page-header h1 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: #131a2b;
+}
+
+#app .subtitle {
+  color: var(--rp-muted);
+}
+
+#app .stat-label {
+  color: var(--rp-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+#app .stat-value {
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-value {
+  color: #17203a;
+}
+
+/* ── 卡片 ──────────────────────────────────────────── */
+.el-card {
+  border-radius: 14px;
+  border: 1px solid var(--rp-line);
+  box-shadow: var(--rp-shadow-card);
+}
+
+/* 视图里大量用了 shadow="never"，这里统一抬一层柔和阴影 */
+.el-card.is-never-shadow {
+  box-shadow: var(--rp-shadow-card);
+}
+
+/* ── 按钮 ──────────────────────────────────────────── */
+.el-button {
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.el-button--primary {
+  border: none;
+  background: linear-gradient(180deg, #5580ff 0%, #406cff 100%);
+  box-shadow: 0 6px 16px -8px rgba(64, 108, 255, 0.7);
+}
+
+.el-button--primary:hover,
+.el-button--primary:focus {
+  background: linear-gradient(180deg, #6a90ff 0%, #4d78ff 100%);
+}
+
+.el-button--primary:active {
+  background: #3356cc;
+}
+
+.el-button--primary.is-link,
+.el-button--primary.is-text {
+  background: none;
+  box-shadow: none;
+}
+
+.el-button--default {
+  background: #ffffff;
+  border: 1px solid #d7dbe4;
+  color: var(--el-text-color-regular);
+}
+
+.el-button--default:hover,
+.el-button--default:focus {
+  color: var(--el-color-primary);
+  border-color: #b9c8ff;
+  background: #f5f8ff;
+}
+
+/* ── 表格 ──────────────────────────────────────────── */
+.el-table {
+  --el-table-header-bg-color: #f8fafd;
+  --el-table-header-text-color: #667085;
+  --el-table-row-hover-bg-color: #f5f8ff;
+  --el-table-border-color: #f0f2f6;
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+.el-table th.el-table__cell {
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+}
+
+.el-table .el-table__cell {
+  padding: 10px 0;
+}
+
+/* ── 标签 / 警告条 / 描述列表 ───────────────────────── */
+.el-tag {
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+.el-alert {
+  border-radius: 10px;
+}
+
+.el-descriptions {
+  --el-descriptions-item-bordered-label-background: #f8fafd;
+}
+
+/* ── 输入控件 ──────────────────────────────────────── */
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner {
+  border-radius: 8px;
+}
+
+/* ── 浮层：对话框 / 抽屉 / 确认框 ──────────────────── */
+.el-overlay {
+  backdrop-filter: blur(2px);
+}
+
+.el-dialog,
+.el-message-box {
+  border-radius: 14px;
+  box-shadow: var(--rp-shadow-pop);
+}
+
+.el-drawer {
+  box-shadow: var(--rp-shadow-pop);
+}
+
+.el-drawer.rtl {
+  border-radius: 16px 0 0 16px;
+}
+
+.el-drawer.ltr {
+  border-radius: 0 16px 16px 0;
+}
