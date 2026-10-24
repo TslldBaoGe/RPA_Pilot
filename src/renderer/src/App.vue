@@ -43,7 +43,7 @@ const updateBadge = computed(() => {
 
 <template>
   <el-container class="shell">
-    <el-aside width="208px" class="aside">
+    <el-aside width="176px" class="aside">
       <div class="brand">
         <img :src="logoUrl" class="brand-logo" alt="RPA_Pilot" />
         <div class="brand-text">
@@ -144,7 +144,7 @@ const updateBadge = computed(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 20px 16px;
+  padding: 0 16px 16px;
 }
 
 .brand-logo {
@@ -176,7 +176,7 @@ const updateBadge = computed(() => {
 }
 
 .nav-caption {
-  padding: 2px 22px 8px;
+  padding: 2px 18px 8px;
   font-size: 11px;
   letter-spacing: 2px;
   color: #a8afc0;
@@ -231,7 +231,7 @@ const updateBadge = computed(() => {
 }
 
 .aside-footer {
-  padding: 14px 20px 0;
+  padding: 14px 16px 0;
   border-top: 1px solid #e9ecf3;
 }
 

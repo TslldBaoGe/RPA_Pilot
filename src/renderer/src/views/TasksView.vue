@@ -455,7 +455,7 @@ const stats = computed(() => ({
           </template>
         </el-table-column>
 
-        <el-table-column label="定时 / 下次运行" width="182" show-overflow-tooltip>
+        <el-table-column label="定时 / 下次运行" width="150" show-overflow-tooltip>
           <template #default="{ row }">
             <template v-if="scheduleOf(row.id)">
               <span class="path-text">{{ scheduleOf(row.id)?.cronExpr }}</span>
@@ -471,7 +471,7 @@ const stats = computed(() => ({
           </template>
         </el-table-column>
 
-        <el-table-column label="开始运行" width="148">
+        <el-table-column label="开始运行" width="128">
           <template #default="{ row }">
             <span v-if="latestRunOf(row.id)?.startedAt" class="time-cell">
               {{ formatMoment(latestRunOf(row.id)!.startedAt) }}
@@ -480,7 +480,7 @@ const stats = computed(() => ({
           </template>
         </el-table-column>
 
-        <el-table-column label="运行时长" width="104">
+        <el-table-column label="运行时长" width="90">
           <template #default="{ row }">
             <span class="time-cell" :class="{ 'text-primary': isRunLive(latestRunOf(row.id)) }">
               {{ durationOf(row.id) }}
@@ -488,7 +488,7 @@ const stats = computed(() => ({
           </template>
         </el-table-column>
 
-        <el-table-column label="结束运行" width="148">
+        <el-table-column label="结束运行" width="128">
           <template #default="{ row }">
             <span v-if="latestRunOf(row.id)?.finishedAt" class="time-cell">
               {{ formatMoment(latestRunOf(row.id)!.finishedAt) }}
@@ -499,7 +499,7 @@ const stats = computed(() => ({
           </template>
         </el-table-column>
 
-        <el-table-column label="脚本文件" min-width="200" show-overflow-tooltip>
+        <el-table-column label="脚本文件" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="script-cell">
               <span class="path-text">{{ row.scriptPath }}</span>
@@ -517,7 +517,7 @@ const stats = computed(() => ({
           </template>
         </el-table-column>
 
-        <el-table-column label="Python 环境" width="140">
+        <el-table-column label="Python 环境" width="116">
           <template #default="{ row }">
             <template v-if="row.interpreterPath">
               <el-tag size="small" type="warning" effect="plain">自定义</el-tag>
@@ -528,13 +528,13 @@ const stats = computed(() => ({
           </template>
         </el-table-column>
 
-        <el-table-column label="启用" width="76">
+        <el-table-column label="启用" width="64">
           <template #default="{ row }">
             <el-switch :model-value="row.enabled" @change="(value: boolean) => toggleEnabled(row, value)" />
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="252" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="!isRunning(row)"
@@ -693,7 +693,7 @@ const stats = computed(() => ({
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 132px;
+  max-width: 96px;
 }
 
 /* ── 中文名称：首字徽章 + 名称，配色随名字哈希 ── */
