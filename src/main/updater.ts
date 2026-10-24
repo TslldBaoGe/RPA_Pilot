@@ -367,10 +367,16 @@ export function installUpdate(): InstallResult {
     log(`安装前清理出错（继续安装）：${err instanceof Error ? err.message : String(err)}`)
   }
 
-  // 参数：静默安装（NSIS 的 --updated 会跳过向导页），装完自动重启
+  // 参数：显示 NSIS 安装向导（覆盖安装界面），装完自动重启。
+  //
+  // 之前是静默安装 quitAndInstall(true, true)：无签名安装包在后台悄悄替换
+  // 应用目录里的 exe/DLL，这个行为模式和「DLL 劫持」在杀软启发式里高度重合，
+  // 360/火绒会弹「DLL 风险」。改成弹向导让用户亲手点「安装」，杀软看到的
+  // 就是普通的用户主动安装流程，误报概率大幅下降。
+  // 注意 isForceRunAfter=true 在向导模式下依然生效：装完点「完成」后自动拉起客户端。
   setImmediate(() => {
     try {
-      autoUpdater.quitAndInstall(true, true)
+      autoUpdater.quitAndInstall(false, true)
     } catch (err) {
       log(`quitAndInstall 失败：${err instanceof Error ? err.message : String(err)}`)
     }

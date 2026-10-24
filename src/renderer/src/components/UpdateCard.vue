@@ -141,8 +141,9 @@ function download(): void {
 async function install(): Promise<void> {
   try {
     await ElMessageBox.confirm(
-      `将关闭客户端并安装新版本 ${state.value?.version ?? ''}，安装完成后会自动重启。\n` +
-        '任务配置、运行历史与日志都保存在数据目录，不会丢失。',
+      `将退出客户端并弹出安装向导，按提示点「安装」完成覆盖，完成后会自动重启。\n` +
+        `任务配置、运行历史与日志都保存在数据目录，不会丢失。\n` +
+        `若杀毒软件弹出提示，选择「允许」即可（这是客户端自己在更新，不是外部程序）。`,
       '确认安装更新',
       { type: 'warning', confirmButtonText: '立即安装', cancelButtonText: '稍后' }
     )
