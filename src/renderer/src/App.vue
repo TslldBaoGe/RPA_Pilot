@@ -88,11 +88,12 @@ const updateBadge = computed(() => {
   height: 100%;
 }
 
-/* 深色侧栏：整个界面的「高级感」主要来自这里 —— 深海军蓝渐变 + 品牌色高亮 */
+/* 浅色侧栏：柔和的浅灰蓝渐变，高级感靠圆角胶囊导航、留白与层级撑起来 */
 .aside {
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #111a33 0%, #0c142b 100%);
+  background: linear-gradient(180deg, #f9fafd 0%, #f3f5fa 100%);
+  border-right: 1px solid #e9ecf3;
   padding: 18px 0 14px;
   overflow: hidden;
 }
@@ -110,7 +111,7 @@ const updateBadge = computed(() => {
   height: 30px;
   display: block;
   border-radius: 8px;
-  box-shadow: 0 4px 12px -4px rgba(64, 108, 255, 0.6);
+  box-shadow: 0 4px 10px -4px rgba(64, 108, 255, 0.45);
 }
 
 .brand-text {
@@ -123,12 +124,12 @@ const updateBadge = computed(() => {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.3px;
-  color: #f4f7ff;
+  color: #1b2233;
 }
 
 .brand-sub {
   font-size: 11px;
-  color: #7d8ab0;
+  color: #98a0b3;
   letter-spacing: 1px;
 }
 
@@ -136,7 +137,7 @@ const updateBadge = computed(() => {
   padding: 2px 22px 8px;
   font-size: 11px;
   letter-spacing: 2px;
-  color: #5d6a8f;
+  color: #a8afc0;
 }
 
 .menu {
@@ -146,9 +147,9 @@ const updateBadge = computed(() => {
   padding: 0 10px;
 
   --el-menu-bg-color: transparent;
-  --el-menu-text-color: #97a3c4;
+  --el-menu-text-color: #5b6478;
   --el-menu-active-color: #ffffff;
-  --el-menu-hover-bg-color: rgba(255, 255, 255, 0.07);
+  --el-menu-hover-bg-color: rgba(27, 34, 51, 0.05);
 }
 
 .menu :deep(.el-menu-item) {
@@ -161,19 +162,19 @@ const updateBadge = computed(() => {
 }
 
 .menu :deep(.el-menu-item:hover) {
-  background: rgba(255, 255, 255, 0.07);
-  color: #ffffff;
+  background: rgba(27, 34, 51, 0.05);
+  color: #1b2233;
 }
 
 .menu :deep(.el-menu-item.is-active) {
   background: linear-gradient(135deg, #406cff 0%, #5d8bff 100%);
   color: #ffffff;
-  box-shadow: 0 8px 20px -8px rgba(64, 108, 255, 0.85);
+  box-shadow: 0 8px 20px -8px rgba(64, 108, 255, 0.65);
 }
 
 .aside-footer {
   padding: 14px 20px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid #e9ecf3;
 }
 
 .meta-line {
@@ -181,27 +182,27 @@ const updateBadge = computed(() => {
   gap: 6px;
 }
 
-/* 深底上的小徽章：半透明底 + 描边，比默认 el-tag 通透 */
+/* 浅底上的小徽章：白底描边，通透不抢戏 */
 .chip {
   font-size: 11px;
   line-height: 1;
   padding: 5px 8px;
   border-radius: 6px;
-  color: #aab4d4;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #5b6478;
+  background: #ffffff;
+  border: 1px solid #e4e7ee;
 }
 
 .chip.ok {
-  color: #7ee2ae;
-  background: rgba(47, 191, 113, 0.14);
-  border-color: rgba(47, 191, 113, 0.28);
+  color: #1f7a4d;
+  background: rgba(47, 191, 113, 0.1);
+  border-color: rgba(47, 191, 113, 0.3);
 }
 
 .chip.warn {
-  color: #ffd27a;
-  background: rgba(245, 165, 36, 0.14);
-  border-color: rgba(245, 165, 36, 0.3);
+  color: #9a6a00;
+  background: rgba(245, 165, 36, 0.12);
+  border-color: rgba(245, 165, 36, 0.35);
 }
 
 .update-banner {
@@ -213,15 +214,15 @@ const updateBadge = computed(() => {
 }
 
 .update-banner.warning {
-  color: #ffd27a;
-  background: rgba(245, 165, 36, 0.14);
-  border: 1px solid rgba(245, 165, 36, 0.3);
+  color: #9a6a00;
+  background: rgba(245, 165, 36, 0.12);
+  border: 1px solid rgba(245, 165, 36, 0.35);
 }
 
 .update-banner.success {
-  color: #7ee2ae;
-  background: rgba(47, 191, 113, 0.14);
-  border: 1px solid rgba(47, 191, 113, 0.28);
+  color: #1f7a4d;
+  background: rgba(47, 191, 113, 0.1);
+  border: 1px solid rgba(47, 191, 113, 0.3);
 }
 
 /* 菜单项右侧的小圆点：只用一个点提示，不抢注意力 */
