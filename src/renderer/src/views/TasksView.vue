@@ -747,36 +747,36 @@ const stats = computed(() => ({
 }
 
 .soft-blue {
-  background: #edf1ff;
-  color: #3d63d8;
+  background: #dbe4ff;
+  color: #2a4ec2;
 }
 
 .soft-blue:hover,
 .soft-blue:focus {
-  background: #dfe8ff;
-  color: #2f4fc0;
+  background: #cdd9ff;
+  color: #1d3da8;
 }
 
 .soft-gray {
-  background: #f2f4f8;
-  color: #4e5969;
+  background: #e8ecf3;
+  color: #343e55;
 }
 
 .soft-gray:hover,
 .soft-gray:focus {
-  background: #e9edf4;
-  color: #2b3345;
+  background: #dde3ec;
+  color: #1c2438;
 }
 
 .soft-red {
-  background: #fdeceb;
-  color: #d8352a;
+  background: #fadbd7;
+  color: #bf2015;
 }
 
 .soft-red:hover,
 .soft-red:focus {
-  background: #fbe2e0;
-  color: #bd2419;
+  background: #f6cec9;
+  color: #a31409;
 }
 
 .empty-text {
