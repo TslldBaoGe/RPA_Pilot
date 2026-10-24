@@ -245,6 +245,15 @@ function isRunLive(run: RunView | null): boolean {
   return !!run && (run.status === 'running' || run.status === 'queued')
 }
 
+/** 名称徽章的配色：按名字哈希取一种，同名任务颜色稳定，不同名视觉上更好认 */
+const NAME_TINTS = ['blue', 'green', 'orange', 'purple', 'teal'] as const
+
+function tintOf(name: string): string {
+  let hash = 0
+  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) % 9973
+  return NAME_TINTS[hash % NAME_TINTS.length]
+}
+
 /** MM-DD HH:mm:ss，表里空间有限，不显示年份 */
 function formatMoment(iso: string | null): string {
   if (!iso) return '—'
@@ -437,7 +446,58 @@ const stats = computed(() => ({
           </template>
         </el-table-column>
 
-        <el-table-column prop="name" label="中文名称" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="name" label="中文名称" min-width="170">
+          <template #default="{ row }">
+            <div class="name-cell">
+              <span class="name-badge" :class="`tint-${tintOf(row.name)}`">{{ row.name.slice(0, 1) }}</span>
+              <span class="name-text" :title="row.name">{{ row.name }}</span>
+            </div>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="定时 / 下次运行" width="182" show-overflow-tooltip>
+          <template #default="{ row }">
+            <template v-if="scheduleOf(row.id)">
+              <span class="path-text">{{ scheduleOf(row.id)?.cronExpr }}</span>
+              <div v-if="scheduleOf(row.id)?.error" class="tiny text-danger">
+                {{ scheduleOf(row.id)?.error }}
+              </div>
+              <div v-else-if="scheduleOf(row.id)?.nextRun" class="tiny muted">
+                下次 {{ formatNextRun(scheduleOf(row.id)!.nextRun!) }}
+              </div>
+              <div v-else class="tiny muted">未注册</div>
+            </template>
+            <span v-else class="muted">仅手动</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="开始运行" width="148">
+          <template #default="{ row }">
+            <span v-if="latestRunOf(row.id)?.startedAt" class="time-cell">
+              {{ formatMoment(latestRunOf(row.id)!.startedAt) }}
+            </span>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="运行时长" width="104">
+          <template #default="{ row }">
+            <span class="time-cell" :class="{ 'text-primary': isRunLive(latestRunOf(row.id)) }">
+              {{ durationOf(row.id) }}
+            </span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="结束运行" width="148">
+          <template #default="{ row }">
+            <span v-if="latestRunOf(row.id)?.finishedAt" class="time-cell">
+              {{ formatMoment(latestRunOf(row.id)!.finishedAt) }}
+            </span>
+            <span v-else-if="latestRunOf(row.id)?.status === 'queued'" class="muted">排队中</span>
+            <span v-else-if="isRunLive(latestRunOf(row.id))" class="text-primary">运行中</span>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
 
         <el-table-column label="脚本文件" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
@@ -468,72 +528,27 @@ const stats = computed(() => ({
           </template>
         </el-table-column>
 
-        <el-table-column label="定时 / 下次运行" width="182" show-overflow-tooltip>
-          <template #default="{ row }">
-            <template v-if="scheduleOf(row.id)">
-              <span class="path-text">{{ scheduleOf(row.id)?.cronExpr }}</span>
-              <div v-if="scheduleOf(row.id)?.error" class="tiny text-danger">
-                {{ scheduleOf(row.id)?.error }}
-              </div>
-              <div v-else-if="scheduleOf(row.id)?.nextRun" class="tiny muted">
-                下次 {{ formatNextRun(scheduleOf(row.id)!.nextRun!) }}
-              </div>
-              <div v-else class="tiny muted">未注册</div>
-            </template>
-            <span v-else class="muted">仅手动</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="开始运行" width="148">
-          <template #default="{ row }">
-            <span v-if="latestRunOf(row.id)?.startedAt" class="time-cell">
-              {{ formatMoment(latestRunOf(row.id)!.startedAt) }}
-            </span>
-            <span v-else class="muted">—</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="结束运行" width="148">
-          <template #default="{ row }">
-            <span v-if="latestRunOf(row.id)?.finishedAt" class="time-cell">
-              {{ formatMoment(latestRunOf(row.id)!.finishedAt) }}
-            </span>
-            <span v-else-if="latestRunOf(row.id)?.status === 'queued'" class="muted">排队中</span>
-            <span v-else-if="isRunLive(latestRunOf(row.id))" class="text-primary">运行中</span>
-            <span v-else class="muted">—</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="运行时长" width="104">
-          <template #default="{ row }">
-            <span class="time-cell" :class="{ 'text-primary': isRunLive(latestRunOf(row.id)) }">
-              {{ durationOf(row.id) }}
-            </span>
-          </template>
-        </el-table-column>
-
         <el-table-column label="启用" width="76">
           <template #default="{ row }">
             <el-switch :model-value="row.enabled" @change="(value: boolean) => toggleEnabled(row, value)" />
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="248" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="!isRunning(row)"
-              link
-              type="primary"
+              class="soft soft-blue"
               size="small"
               @click="execute(row)"
             >
               执行
             </el-button>
-            <el-button v-else link type="danger" size="small" @click="stopTaskRun(row)">停止</el-button>
+            <el-button v-else class="soft soft-red" size="small" @click="stopTaskRun(row)">停止</el-button>
 
-            <el-button link type="primary" size="small" @click="openLatestLog(row)">日志</el-button>
-            <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-            <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
+            <el-button class="soft soft-gray" size="small" @click="openLatestLog(row)">日志</el-button>
+            <el-button class="soft soft-gray" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button class="soft soft-red" size="small" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -679,6 +694,89 @@ const stats = computed(() => ({
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 132px;
+}
+
+/* ── 中文名称：首字徽章 + 名称，配色随名字哈希 ── */
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.name-badge {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.name-text {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: #1b2233;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tint-blue { background: #edf1ff; color: #3d63d8; }
+.tint-green { background: #e7f8ef; color: #1f8a55; }
+.tint-orange { background: #fff4e3; color: #b06e00; }
+.tint-purple { background: #f3edff; color: #7449d8; }
+.tint-teal { background: #e5f6f6; color: #0f7f86; }
+
+/* ── 操作列：浅色底小按钮 ── */
+.soft {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  margin-left: 6px;
+}
+
+.soft:first-child {
+  margin-left: 0;
+}
+
+.soft-blue {
+  background: #edf1ff;
+  color: #3d63d8;
+}
+
+.soft-blue:hover,
+.soft-blue:focus {
+  background: #dfe8ff;
+  color: #2f4fc0;
+}
+
+.soft-gray {
+  background: #f2f4f8;
+  color: #4e5969;
+}
+
+.soft-gray:hover,
+.soft-gray:focus {
+  background: #e9edf4;
+  color: #2b3345;
+}
+
+.soft-red {
+  background: #fdeceb;
+  color: #d8352a;
+}
+
+.soft-red:hover,
+.soft-red:focus {
+  background: #fbe2e0;
+  color: #bd2419;
 }
 
 .empty-text {
