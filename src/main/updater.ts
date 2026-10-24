@@ -373,7 +373,10 @@ export function installUpdate(): InstallResult {
   // 应用目录里的 exe/DLL，这个行为模式和「DLL 劫持」在杀软启发式里高度重合，
   // 360/火绒会弹「DLL 风险」。改成弹向导让用户亲手点「安装」，杀软看到的
   // 就是普通的用户主动安装流程，误报概率大幅下降。
-  // 注意 isForceRunAfter=true 在向导模式下依然生效：装完点「完成」后自动拉起客户端。
+  //
+  // 自动重启注意：--force-run 在向导模式下不生效（模板只对静默安装自动启动，
+  // 向导模式依赖完成页的「运行」勾选框，用户点 X 关闭就跳过）。真正的兜底在
+  // resources\installer.nsh 的 customInstall：覆盖更新装完文件立即拉起新版本。
   setImmediate(() => {
     try {
       autoUpdater.quitAndInstall(false, true)
