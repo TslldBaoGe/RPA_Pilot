@@ -2,6 +2,7 @@ import { appendFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { BrowserWindow, app } from 'electron'
 import type { Tray } from 'electron'
+import { runAumidGuard } from './core/aumid-guard'
 import { openDatabase, readStats } from './core/db'
 import type { Db } from './core/db'
 import { cleanupLogs } from './core/logs'
@@ -35,7 +36,10 @@ let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let db: Db | null = null
 
-app.setAppUserModelId('com.rpapilot.desktop')
+/** 应用身份。任务栏分组、通知都按它认领，写进快捷方式的 AUMID 必须与这里一致 */
+const APP_USER_MODEL_ID = 'com.rpapilot.desktop'
+
+app.setAppUserModelId(APP_USER_MODEL_ID)
 
 /**
  * 启动诊断日志。
@@ -221,6 +225,34 @@ async function bootstrap(): Promise<void> {
 
   tray = createTray({ getWindow: () => mainWindow })
   bootLog('托盘已创建，启动完成')
+
+  // AUMID 身份守卫：有人复制快捷方式改指向时，AUMID 会被一起复制，任务栏分组的
+  // 名字/图标就被那个冒牌快捷方式顶掉（实测显示成 Electron + 原子图标）。
+  // 启动后延迟扫描一次开始菜单，冒牌货自动隔离成 .bak。
+  if (process.platform === 'win32') {
+    setTimeout(() => {
+      try {
+        const guard = runAumidGuard({
+          aumid: APP_USER_MODEL_ID,
+          exePath: process.execPath,
+          userStartMenu: join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+          commonStartMenu: join(
+            process.env.ProgramData ?? 'C:\\ProgramData',
+            'Microsoft',
+            'Windows',
+            'Start Menu',
+            'Programs'
+          ),
+          log: (message) => bootLog(`AUMID 守卫：${message}`)
+        })
+        if (guard.renamed.length > 0) {
+          bootLog(`AUMID 守卫：共隔离 ${guard.renamed.length} 个冒牌快捷方式`)
+        }
+      } catch (err) {
+        bootLog(`AUMID 守卫异常：${err instanceof Error ? err.message : String(err)}`)
+      }
+    }, 10_000)
+  }
 
   app.on('activate', () => {
     if (mainWindow && !mainWindow.isVisible()) mainWindow.show()
