@@ -55,12 +55,54 @@ const updateBadge = computed(() => {
       <div class="nav-caption">工作台</div>
 
       <el-menu :default-active="activeIndex" router class="menu">
-        <el-menu-item index="/tasks">任务管理</el-menu-item>
-        <el-menu-item index="/runs">运行记录</el-menu-item>
-        <el-menu-item index="/env">运行环境</el-menu-item>
+        <el-menu-item index="/tasks">
+          <span class="mi">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="8" y="2" width="8" height="4" rx="1" />
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+              <path d="M9 12h.01" />
+              <path d="M13 12h2" />
+              <path d="M9 16h.01" />
+              <path d="M13 16h2" />
+            </svg>
+            <span>任务管理</span>
+          </span>
+        </el-menu-item>
+        <el-menu-item index="/runs">
+          <span class="mi">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v5l3 2" />
+            </svg>
+            <span>运行记录</span>
+          </span>
+        </el-menu-item>
+        <el-menu-item index="/env">
+          <span class="mi">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 8l-9-5-9 5v8l9 5 9-5V8z" />
+              <path d="M3.3 7.9L12 12.8l8.7-4.9" />
+              <path d="M12 22v-9.2" />
+            </svg>
+            <span>运行环境</span>
+          </span>
+        </el-menu-item>
         <el-menu-item index="/settings">
-          <span>设置</span>
-          <span v-if="updateBadge" class="menu-dot" :class="updateBadge.type" />
+          <span class="mi">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 21v-7" />
+              <path d="M4 10V3" />
+              <path d="M12 21v-9" />
+              <path d="M12 8V3" />
+              <path d="M20 21v-5" />
+              <path d="M20 12V3" />
+              <path d="M1 14h6" />
+              <path d="M9 8h6" />
+              <path d="M17 16h6" />
+            </svg>
+            <span>设置</span>
+            <span v-if="updateBadge" class="menu-dot" :class="updateBadge.type" />
+          </span>
         </el-menu-item>
       </el-menu>
 
@@ -147,7 +189,7 @@ const updateBadge = computed(() => {
   padding: 0 10px;
 
   --el-menu-bg-color: transparent;
-  --el-menu-text-color: #5b6478;
+  --el-menu-text-color: #333c52;
   --el-menu-active-color: #ffffff;
   --el-menu-hover-bg-color: rgba(27, 34, 51, 0.05);
 }
@@ -157,7 +199,9 @@ const updateBadge = computed(() => {
   line-height: 42px;
   margin: 3px 0;
   border-radius: 10px;
-  font-size: 13.5px;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
   transition: background 0.15s ease;
 }
 
@@ -170,6 +214,20 @@ const updateBadge = computed(() => {
   background: linear-gradient(135deg, #406cff 0%, #5d8bff 100%);
   color: #ffffff;
   box-shadow: 0 8px 20px -8px rgba(64, 108, 255, 0.65);
+}
+
+/* 菜单项：图标 + 文字；图标颜色跟随文字色，选中时自动变白 */
+.mi {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mi svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
 .aside-footer {
