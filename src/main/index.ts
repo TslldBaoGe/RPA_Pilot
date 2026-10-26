@@ -7,8 +7,10 @@ import { openDatabase, readStats } from './core/db'
 import type { Db } from './core/db'
 import { cleanupLogs } from './core/logs'
 import { createPaths, resolveProjectRoot } from './core/paths'
-import { stopAll } from './core/runner'
+import { createFloatingStatusWindow } from './floating-status'
+import { stopAll, requestRun } from './core/runner'
 import { reconcileStaleRuns } from './core/runs'
+import { listTasks } from './core/tasks'
 import { checkMissedRuns, reloadAll, stopScheduler } from './core/scheduler'
 import { readAppSettings } from './core/settings'
 import { syncTasksFromDisk } from './core/tasks'
@@ -154,7 +156,7 @@ async function bootstrap(): Promise<void> {
     console.log(`[rpa-pilot] 已清理 ${stale} 条上次退出时残留的运行记录`)
   }
 
-  registerIpc(paths, db)
+  registerIpc(paths, db, () => mainWindow)
   bootLog('IPC 已注册')
 
   if (isSelfTest) {
@@ -223,8 +225,23 @@ async function bootstrap(): Promise<void> {
   bootLog('主窗口已创建')
   bootLog(`图标解析：${describeIconResolution()}`)
 
+  createFloatingStatusWindow()
+
   tray = createTray({ getWindow: () => mainWindow })
   bootLog('托盘已创建，启动完成')
+
+  // 联调钩子：RPA_PILOT_AUTORUN=1 时自动执行第一个任务（验证悬浮状态框/通知链路用）。
+  // 必须在悬浮窗创建之后调用 —— 运行一开始状态框就要接得住。
+  if (process.env.RPA_PILOT_AUTORUN === '1') {
+    const tasks = listTasks(db, new Set(), paths)
+    const target = tasks[0]
+    if (target) {
+      bootLog(`AUTORUN：自动执行任务「${target.name}」`)
+      requestRun(target.id, 'manual')
+    } else {
+      bootLog('AUTORUN：没有可执行的任务')
+    }
+  }
 
   // AUMID 身份守卫：有人复制快捷方式改指向时，AUMID 会被一起复制，任务栏分组的
   // 名字/图标就被那个冒牌快捷方式顶掉（实测显示成 Electron + 原子图标）。

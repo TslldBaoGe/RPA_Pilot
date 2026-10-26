@@ -60,6 +60,12 @@ body {
   user-select: none;
 }
 
+/* 悬浮运行状态框：透明窗口，底色/光晕都要让位 */
+body.rp-floating,
+body.rp-floating #app {
+  background: transparent !important;
+}
+
 /* 内容区带一丝品牌色的顶部光晕，去掉「一块灰底」的廉价感 */
 #app {
   background:

@@ -33,6 +33,9 @@ onBeforeUnmount(() => {
 
 const activeIndex = computed(() => route.path)
 
+/** 悬浮运行状态框是独立小窗，不能套主界面的侧栏骨架 */
+const isFloating = computed(() => route.path === '/floating')
+
 const updateBadge = computed(() => {
   const phase = update.value?.phase
   if (phase === 'downloaded') return { text: '更新已就绪', type: 'success' as const }
@@ -42,7 +45,8 @@ const updateBadge = computed(() => {
 </script>
 
 <template>
-  <el-container class="shell">
+  <router-view v-if="isFloating" />
+  <el-container v-else class="shell">
     <el-aside width="176px" class="aside">
       <div class="brand">
         <img :src="logoUrl" class="brand-logo" alt="RPA机器人" />

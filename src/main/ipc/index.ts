@@ -43,6 +43,7 @@ import { cleanupLogs, measureLogs } from '../core/logs'
 import { notifyFailure, sendFeishuText, shouldNotify, showSystemNotification } from '../core/notify'
 import type { ProjectPaths } from '../core/paths'
 import { configureRunner, getRunLogBuffer, listActiveRuns, requestRun, stopAll, stopRun, stopTask } from '../core/runner'
+import { syncFloatingStatus } from '../floating-status'
 import { getRunView, insertRun, listRunViews } from '../core/runs'
 import {
   configureScheduler,
@@ -129,7 +130,11 @@ function asEnvCreateOptions(raw: unknown): EnvCreateOptions {
   }
 }
 
-export function registerIpc(paths: ProjectPaths, db: Db): void {
+export function registerIpc(
+  paths: ProjectPaths,
+  db: Db,
+  getWindow: () => BrowserWindow | null = () => null
+): void {
   /** 每次都重新解析：用户在界面上改了位置之后不需要重启应用 */
   const currentConda = (): CondaResolution => resolveCondaDir(getSetting(db, CONDA_DIR_SETTING))
 
@@ -470,10 +475,23 @@ export function registerIpc(paths: ProjectPaths, db: Db): void {
     onLog: (event) => broadcast('run:log', event),
     onUpdate: (event) => {
       broadcast('run:update', event)
+      // 右下角悬浮运行状态框：按活跃运行数同步出现/消失/尺寸
+      syncFloatingStatus(listActiveRuns().length)
       // 任务开始/结束时「能不能装更新」会变（有任务在跑就不许装），要同步给界面
       refreshUpdateState()
       void maybeNotifyFailure(event.run)
     }
+  })
+
+  /** 悬浮框点卡片唤起主窗口 */
+  ipcMain.handle('app:showMain', (): { ok: true } => {
+    const win = getWindow()
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    }
+    return { ok: true }
   })
 
   configureScheduler({

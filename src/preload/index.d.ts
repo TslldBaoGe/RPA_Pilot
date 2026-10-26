@@ -73,6 +73,8 @@ export interface RpaPilotApi {
   gitSummary(): Promise<GitSummary>
   /** 在任务目录里手动执行 git pull --ff-only */
   gitPull(): Promise<GitPullResult>
+  /** 悬浮运行状态框点卡片时唤起主窗口 */
+  showMainWindow(): Promise<{ ok: true }>
 
   /** 立即执行；返回的运行可能是 skipped / queued（取决于并发策略） */
   startRun(taskId: string): Promise<RunStartResult>

@@ -73,6 +73,8 @@ const api = {
     ipcRenderer.invoke('dialog:pickInterpreter'),
   gitSummary: (): Promise<GitSummary> => ipcRenderer.invoke('git:summary'),
   gitPull: (): Promise<GitPullResult> => ipcRenderer.invoke('git:pull'),
+  /** 悬浮运行状态框点卡片时唤起主窗口 */
+  showMainWindow: (): Promise<{ ok: true }> => ipcRenderer.invoke('app:showMain'),
   /** 即时校验脚本路径，用于界面反馈 */
   inspectScript: (scriptPath: string): Promise<ScriptInspectResult> =>
     ipcRenderer.invoke('tasks:inspectScript', scriptPath),
