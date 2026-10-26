@@ -61,6 +61,11 @@ publish:
   url: http://8.134.166.149:8088/
 
 nsis:
+  # 快捷方式与卸载列表的显示名：用户看到的中文名。
+  # productName 保持 RPA_Pilot 不变 —— 它决定 exe 文件名/安装目录/安装包文件名，
+  # 改成中文会让升级时安装目录嵌套、更新链路出非 ASCII 文件名风险，刻意不动。
+  shortcutName: RPA机器人
+  uninstallDisplayName: RPA机器人
   # 安装向导、卸载器、向导头部图标都显式指向机器人图标。
   # 不写这几行时靠 electron-builder 的默认推断，一旦推断落空就会显示成
   # Electron 默认的原子图标（安装/卸载界面、以及任务栏上的安装窗口都会中招）。

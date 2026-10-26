@@ -18,7 +18,7 @@ export function createMainWindow(options: WindowOptions = {}): BrowserWindow {
     minWidth: 960,
     minHeight: 640,
     show: false,
-    title: 'RPA_Pilot',
+    title: 'RPA机器人',
     // 不设的话任务栏会是 Electron 默认的原子图标
     ...(icon ? { icon } : {}),
     autoHideMenuBar: true,

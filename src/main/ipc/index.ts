@@ -222,7 +222,7 @@ export function registerIpc(paths: ProjectPaths, db: Db): void {
     await notifyFailure(task, run, {
       feishuWebhook: settings.feishuWebhook,
       logPath: run.logPath,
-      appName: 'RPA_Pilot'
+      appName: 'RPA机器人'
     })
   }
 

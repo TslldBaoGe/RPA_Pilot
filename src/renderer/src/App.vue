@@ -45,9 +45,9 @@ const updateBadge = computed(() => {
   <el-container class="shell">
     <el-aside width="176px" class="aside">
       <div class="brand">
-        <img :src="logoUrl" class="brand-logo" alt="RPA_Pilot" />
+        <img :src="logoUrl" class="brand-logo" alt="RPA机器人" />
         <div class="brand-text">
-          <span class="brand-name">RPA_Pilot</span>
+          <span class="brand-name">RPA机器人</span>
           <span class="brand-sub">本地任务中枢</span>
         </div>
       </div>

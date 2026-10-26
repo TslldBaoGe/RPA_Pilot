@@ -45,7 +45,7 @@ function formatDuration(ms: number | null): string {
 
 export function buildFailureMessage(task: TaskRecord, run: RunView): string {
   const lines = [
-    `[RPA_Pilot] 任务${statusText(run.status)}`,
+    `[RPA机器人] 任务${statusText(run.status)}`,
     `任务：${task.name}`,
     `脚本：${task.scriptPath}`,
     `环境：${task.condaEnv || 'base'}`,
@@ -126,7 +126,7 @@ export async function notifyFailure(
   context: NotifyContext
 ): Promise<NotifyResult> {
   const message = buildFailureMessage(task, run)
-  const title = `${context.appName ?? 'RPA_Pilot'}：${task.name} ${statusText(run.status)}`
+  const title = `${context.appName ?? 'RPA机器人' }：${task.name} ${statusText(run.status)}`
 
   showSystemNotification(title, `${statusText(run.status)}｜退出码 ${run.exitCode ?? '无'}｜耗时 ${formatDuration(run.durationMs)}`)
 

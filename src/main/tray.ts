@@ -12,7 +12,7 @@ export function createTray(options: TrayOptions): Tray {
   const icon = resolveTrayIcon()
 
   const tray = new Tray(icon)
-  tray.setToolTip('RPA_Pilot · 本地 Python 任务管理')
+  tray.setToolTip('RPA机器人 · 本地 Python 任务管理')
 
   const showWindow = (): void => {
     const win = options.getWindow()
@@ -27,7 +27,7 @@ export function createTray(options: TrayOptions): Tray {
       { label: '显示主窗口', click: showWindow },
       { type: 'separator' },
       {
-        label: '退出 RPA_Pilot',
+        label: '退出 RPA机器人',
         click: () => {
           app.quit()
         }
