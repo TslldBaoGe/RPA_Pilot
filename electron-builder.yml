@@ -79,7 +79,6 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: RPA_Pilot
   # 数据与日志在 %LOCALAPPDATA%\RPA_Pilot，卸载时保留（双保险）
   deleteAppDataOnUninstall: false
   # 装完不自动启动，免得业务同事装机时被突然弹窗吓到
