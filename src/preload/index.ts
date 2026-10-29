@@ -18,6 +18,7 @@ import type {
   RunView,
   ScheduledTaskInfo,
   ScriptInspectResult,
+  TrackedRun,
   SettingsPatch,
   SettingsView,
   LogCleanupView,
@@ -75,6 +76,20 @@ const api = {
   gitPull: (): Promise<GitPullResult> => ipcRenderer.invoke('git:pull'),
   /** 悬浮运行状态框点卡片时唤起主窗口 */
   showMainWindow: (): Promise<{ ok: true }> => ipcRenderer.invoke('app:showMain'),
+
+  /** 悬浮框：当前跟踪的运行（含已结束、仍在展示结果的卡片） */
+  listFloatingRuns: (): Promise<TrackedRun[]> => ipcRenderer.invoke('floating:list'),
+  /** 悬浮框：关闭某张卡片（运行中的先停止） */
+  dismissFloatingRun: (runId: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('floating:dismiss', runId),
+  /** 悬浮框内容变化（开始/结束/移除） */
+  onFloatingChanged: (callback: (runs: TrackedRun[]) => void): (() => void) => {
+    const listener = (_event: IpcRendererEvent, payload: TrackedRun[]): void => callback(payload)
+    ipcRenderer.on('floating:changed', listener)
+    return () => {
+      ipcRenderer.removeListener('floating:changed', listener)
+    }
+  },
   /** 即时校验脚本路径，用于界面反馈 */
   inspectScript: (scriptPath: string): Promise<ScriptInspectResult> =>
     ipcRenderer.invoke('tasks:inspectScript', scriptPath),

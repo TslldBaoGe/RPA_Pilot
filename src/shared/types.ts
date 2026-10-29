@@ -197,6 +197,23 @@ export interface ActiveRunInfo {
   logPath: string
 }
 
+/**
+ * 悬浮运行状态框里的一张卡片。
+ * 运行中 active=true；结束后 active=false 但卡片仍保留（展示结果，直到用户关闭）。
+ */
+export interface TrackedRun {
+  runId: string
+  taskId: string
+  taskName: string
+  status: RunStatus
+  startedAt: string | null
+  finishedAt: string | null
+  durationMs: number | null
+  active: boolean
+  /** 结束时的简述：成功为 null，失败/超时/终止为原因 */
+  note: string | null
+}
+
 /* ── M5：定时调度 ─────────────────────────────────────────── */
 
 export interface ScheduledTaskInfo {

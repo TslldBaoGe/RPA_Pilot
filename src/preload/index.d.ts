@@ -24,6 +24,7 @@ import type {
   TaskSyncResult,
   TasksDirChangeResult,
   TaskView,
+  TrackedRun,
   UpdateInstallResult,
   UpdateState
 } from '../shared/types'
@@ -75,6 +76,12 @@ export interface RpaPilotApi {
   gitPull(): Promise<GitPullResult>
   /** 悬浮运行状态框点卡片时唤起主窗口 */
   showMainWindow(): Promise<{ ok: true }>
+  /** 悬浮框：当前跟踪的运行（含已结束、仍在展示结果的卡片） */
+  listFloatingRuns(): Promise<TrackedRun[]>
+  /** 悬浮框：关闭某张卡片（运行中的会先停止该任务） */
+  dismissFloatingRun(runId: string): Promise<{ ok: boolean }>
+  /** 悬浮框内容变化（运行开始/结束/卡片被关闭） */
+  onFloatingChanged(callback: (runs: TrackedRun[]) => void): () => void
 
   /** 立即执行；返回的运行可能是 skipped / queued（取决于并发策略） */
   startRun(taskId: string): Promise<RunStartResult>

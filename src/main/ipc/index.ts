@@ -43,7 +43,8 @@ import { cleanupLogs, measureLogs } from '../core/logs'
 import { notifyFailure, sendFeishuText, shouldNotify, showSystemNotification } from '../core/notify'
 import type { ProjectPaths } from '../core/paths'
 import { configureRunner, getRunLogBuffer, listActiveRuns, requestRun, stopAll, stopRun, stopTask } from '../core/runner'
-import { syncFloatingStatus } from '../floating-status'
+import { dismissRun, getTrackedRuns, trackRun } from '../floating-status'
+import type { TrackedRun } from '@shared/types'
 import { getRunView, insertRun, listRunViews } from '../core/runs'
 import {
   configureScheduler,
@@ -475,8 +476,8 @@ export function registerIpc(
     onLog: (event) => broadcast('run:log', event),
     onUpdate: (event) => {
       broadcast('run:update', event)
-      // 右下角悬浮运行状态框：按活跃运行数同步出现/消失/尺寸
-      syncFloatingStatus(listActiveRuns().length)
+      // 右下角悬浮运行状态框：开始即出现；结束后卡片保留，显示结果直到手动关闭
+      trackRun(event.run)
       // 任务开始/结束时「能不能装更新」会变（有任务在跑就不许装），要同步给界面
       refreshUpdateState()
       void maybeNotifyFailure(event.run)
@@ -491,6 +492,24 @@ export function registerIpc(
       win.show()
       win.focus()
     }
+    return { ok: true }
+  })
+
+  /** 悬浮框：取当前跟踪的运行（含已结束、仍在展示结果的） */
+  ipcMain.handle('floating:list', (): TrackedRun[] => getTrackedRuns())
+
+  /**
+   * 悬浮框点 ✕：关闭这张卡片。
+   * 还在跑的先停进程 —— 卡片随即随下一次状态更新变成终态，再被移除。
+   */
+  ipcMain.handle('floating:dismiss', async (_event, runId: unknown): Promise<{ ok: boolean }> => {
+    if (typeof runId !== 'string' || runId.length === 0) throw new Error('缺少运行 id')
+    const item = getTrackedRuns().find((run) => run.runId === runId)
+    if (item?.active) {
+      stopRun(runId)
+      return { ok: true }
+    }
+    dismissRun(runId)
     return { ok: true }
   })
 
