@@ -8,6 +8,7 @@ import type { Db } from './core/db'
 import { cleanupLogs } from './core/logs'
 import { createPaths, resolveProjectRoot } from './core/paths'
 import { createFloatingStatusWindow } from './floating-status'
+import { startCloudAgent } from './cloud-agent'
 import { stopAll, requestRun } from './core/runner'
 import { reconcileStaleRuns } from './core/runs'
 import { listTasks } from './core/tasks'
@@ -226,6 +227,9 @@ async function bootstrap(): Promise<void> {
   bootLog(`图标解析：${describeIconResolution()}`)
 
   createFloatingStatusWindow()
+
+  // 云端代理：向 RPA机器人控制台（网页）上报状态并接收远程指令
+  startCloudAgent({ db, paths, log: (message) => bootLog(`云端代理：${message}`) })
 
   tray = createTray({ getWindow: () => mainWindow })
   bootLog('托盘已创建，启动完成')
