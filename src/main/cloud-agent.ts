@@ -148,8 +148,8 @@ async function cycleOnce(deps: AgentDeps): Promise<void> {
   }))
   const runs = db
     .prepare(
-      `SELECT r.id, r.task_id, r.status, r.trigger_type, r.started_at, r.finished_at, r.duration_ms, r.message,
-              t.name AS task_name
+      `SELECT r.id, r.task_id, r.status, r.trigger_type, r.started_at, r.finished_at, r.duration_ms,
+              r.error_summary AS message, t.name AS task_name
        FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
        ORDER BY r.id DESC LIMIT 100`
     )
