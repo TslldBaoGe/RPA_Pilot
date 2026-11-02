@@ -81,7 +81,7 @@ async function get(path: string, timeoutMs = 8000): Promise<any> {
   }
 }
 
-function executeCommand(db: Db, cmd: { id: number; type: string; payload: any }): { ok: boolean; error?: string } {
+function executeCommand(deps: AgentDeps, cmd: { id: number; type: string; payload: any }): { ok: boolean; error?: string } {
   try {
     switch (cmd.type) {
       case 'run_task': {
@@ -152,7 +152,7 @@ function executeCommand(db: Db, cmd: { id: number; type: string; payload: any })
           name: payload.name,
           scriptPath: payload.script_path,
           condaEnv: 'base',
-          cron: payload.cron ?? '',
+          cronExpr: payload.cron ?? null,
           enabled: payload.enabled !== 0
         })
         deps.log(`云端下发任务「${payload.name}」已创建（脚本：${payload.script_path}）`)
@@ -209,7 +209,7 @@ async function cycleOnce(deps: AgentDeps): Promise<void> {
   // 3) 执行指令并回传结果
   const results: { id: number; ok: boolean; error?: string }[] = []
   for (const cmd of commands) {
-    const outcome = executeCommand(db, cmd)
+    const outcome = executeCommand(deps, cmd)
     results.push({ id: cmd.id, ok: outcome.ok, error: outcome.error })
     deps.log(`云端指令 ${cmd.type} 执行${outcome.ok ? '成功' : `失败：${outcome.error ?? ''}`}`)
   }
