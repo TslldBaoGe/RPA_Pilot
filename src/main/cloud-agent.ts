@@ -81,7 +81,8 @@ async function get(path: string, timeoutMs = 8000): Promise<any> {
   }
 }
 
-function executeCommand(deps: AgentDeps, cmd: { id: number; type: string; payload: any }): { ok: boolean; error?: string } {
+async function executeCommand(deps: AgentDeps, cmd: { id: number; type: string; payload: any }): Promise<{ ok: boolean; error?: string }> {
+  const { db, paths } = deps
   try {
     switch (cmd.type) {
       case 'run_task': {
@@ -209,7 +210,7 @@ async function cycleOnce(deps: AgentDeps): Promise<void> {
   // 3) 执行指令并回传结果
   const results: { id: number; ok: boolean; error?: string }[] = []
   for (const cmd of commands) {
-    const outcome = executeCommand(deps, cmd)
+    const outcome = await executeCommand(deps, cmd)
     results.push({ id: cmd.id, ok: outcome.ok, error: outcome.error })
     deps.log(`云端指令 ${cmd.type} 执行${outcome.ok ? '成功' : `失败：${outcome.error ?? ''}`}`)
   }
