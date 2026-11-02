@@ -1,7 +1,9 @@
 import { app } from 'electron'
 import os from 'node:os'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { getSetting, setSetting } from './core/settings'
-import { listTasks } from './core/tasks'
+import { createTask, listTasks } from './core/tasks'
 import type { Db } from './core/db'
 import type { ProjectPaths } from './core/paths'
 import { requestRun, stopRun } from './core/runner'
@@ -92,7 +94,7 @@ function executeCommand(db: Db, cmd: { id: number; type: string; payload: any })
         return { ok: true }
       }
       case 'update_task': {
-        const taskId = Number(cmd.payload.task_id)
+        const taskId = String(cmd.payload.task_id)
         const sets: string[] = []
         const values: (string | number)[] = []
         if (typeof cmd.payload.cron === 'string') {
@@ -107,6 +109,53 @@ function executeCommand(db: Db, cmd: { id: number; type: string; payload: any })
           values.push(taskId)
           db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...values)
         }
+        return { ok: true }
+      }
+      case 'deploy_scripts': {
+        // 控制台下发的脚本包：下载并解到 packages\<包名>\，同 hash 跳过（幂等）
+        const pkg = cmd.payload as { script_id: number; name: string; hash: string }
+        const deployed = JSON.parse(getSetting(db, 'deployedPackages') || '{}') as Record<string, string>
+        if (deployed[String(pkg.script_id)] === pkg.hash) {
+          return { ok: true }
+        }
+        const download = (await get(`/agent/scripts/${pkg.script_id}/download`)) as {
+          files: { path: string; content_base64: string }[]
+        }
+        const targetDir = join(paths.root, 'packages', pkg.name)
+        for (const file of download.files) {
+          const rel = file.path.replace(/\\/g, '/')
+          if (!rel || rel.startsWith('/') || rel.split('/').includes('..')) {
+            throw new Error(`脚本包内文件路径不合法：${file.path}`)
+          }
+          const dest = join(targetDir, ...rel.split('/'))
+          mkdirSync(dirname(dest), { recursive: true })
+          writeFileSync(dest, Buffer.from(file.content_base64, 'base64'))
+        }
+        deployed[String(pkg.script_id)] = pkg.hash
+        setSetting(db, 'deployedPackages', JSON.stringify(deployed))
+        deps.log(`云端下发脚本包「${pkg.name}」已部署（${download.files.length} 个文件）`)
+        return { ok: true }
+      }
+      case 'create_task': {
+        // 控制台远程创建任务（脚本来自已部署的包，路径为包内相对路径）
+        const payload = cmd.payload as {
+          name: string
+          script_path: string
+          cron?: string
+          enabled?: number
+        }
+        const exists = db.prepare('SELECT id FROM tasks WHERE name = ?').get(payload.name) as
+          | { id: string }
+          | undefined
+        if (exists) return { ok: true } // 指令可能重发，幂等跳过
+        createTask(db, new Set(), paths, {
+          name: payload.name,
+          scriptPath: payload.script_path,
+          condaEnv: 'base',
+          cron: payload.cron ?? '',
+          enabled: payload.enabled !== 0
+        })
+        deps.log(`云端下发任务「${payload.name}」已创建（脚本：${payload.script_path}）`)
         return { ok: true }
       }
       default:
