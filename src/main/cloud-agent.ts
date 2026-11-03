@@ -176,6 +176,7 @@ async function cycleOnce(deps: AgentDeps): Promise<void> {
   const beat = await post('/agent/heartbeat', {
     machine_id: machineId,
     hostname: hostnameOf(),
+    username: os.userInfo().username,
     version: app.getVersion(),
     running: 0
   })
