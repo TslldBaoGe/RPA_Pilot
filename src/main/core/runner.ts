@@ -583,6 +583,13 @@ function dequeue(taskId: string): QueueEntry | null {
 
 /* ── 停止 ─────────────────────────────────────────── */
 
+/** 当前正在运行的任务 id 集合（云端同步用来在控制台上标「执行中」） */
+export function activeTaskIds(): Set<string> {
+  const ids = new Set<string>()
+  for (const run of active.values()) ids.add(run.taskId)
+  return ids
+}
+
 export function stopRun(runId: string): boolean {
   const run = active.get(runId)
   if (!run) return false

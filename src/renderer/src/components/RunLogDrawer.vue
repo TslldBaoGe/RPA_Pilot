@@ -354,7 +354,7 @@ function copyLog(): void {
               <span class="history-time">{{ formatClock(item.startedAt) }}</span>
             </div>
             <div class="history-sub">
-              <span>{{ item.trigger === 'schedule' ? '定时' : '手动' }}</span>
+              <span>{{ item.trigger === 'schedule' ? '定时' : item.trigger === 'console' ? '控制台' : '手动' }}</span>
               <span v-if="item.durationMs !== null">· {{ (item.durationMs / 1000).toFixed(1) }}s</span>
               <span v-else-if="item.status === 'running'">· 进行中</span>
               <span class="history-id">{{ shortRunId(item.id) }}</span>

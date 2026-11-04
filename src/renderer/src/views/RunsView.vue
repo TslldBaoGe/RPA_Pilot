@@ -195,7 +195,7 @@ function formatDuration(ms: number | null): string {
         <el-table-column label="触发" width="76">
           <template #default="{ row }">
             <span :class="{ muted: row.trigger !== 'schedule' }">
-              {{ row.trigger === 'schedule' ? '定时' : '手动' }}
+              {{ row.trigger === 'schedule' ? '定时' : row.trigger === 'console' ? '控制台' : '手动' }}
             </span>
           </template>
         </el-table-column>

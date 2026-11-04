@@ -118,7 +118,7 @@ export interface GitPullResult {
   output: string
 }
 
-export type RunTrigger = 'manual' | 'schedule'
+export type RunTrigger = 'manual' | 'schedule' | 'console'
 
 export type RunStatus =
   | 'queued'

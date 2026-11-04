@@ -6,7 +6,7 @@ import { getSetting, setSetting } from './core/settings'
 import { createTask, listTasks } from './core/tasks'
 import type { Db } from './core/db'
 import type { ProjectPaths } from './core/paths'
-import { requestRun, stopRun } from './core/runner'
+import { requestRun, stopRun, activeTaskIds } from './core/runner'
 
 /**
  * 云端代理：让 RPA机器人控制台（网页）能远程管理本机机器人。
@@ -22,7 +22,10 @@ import { requestRun, stopRun } from './core/runner'
  */
 
 const DEFAULT_SERVER = 'http://8.134.166.149'
-const INTERVAL_MS = 10_000
+/** 心跳与指令轮询间隔（控制台下发指令的最坏延迟 ≈ 该值） */
+const INTERVAL_MS = 5_000
+/** 任务清单 / 运行记录的同步周期（按心跳轮数折算） */
+const SYNC_EVERY_TICKS = 2
 
 interface AgentDeps {
   db: Db
@@ -86,7 +89,8 @@ async function executeCommand(deps: AgentDeps, cmd: { id: number; type: string; 
   try {
     switch (cmd.type) {
       case 'run_task': {
-        const result = requestRun(String(cmd.payload.task_id), 'manual')
+        // 控制台下发：触发方式记为「控制台」，与本机手动/定时区分
+        const result = requestRun(String(cmd.payload.task_id), 'console')
         if (result.note) return { ok: true, error: result.note } // skipped/queued 也算执行了指令
         return { ok: true }
       }
@@ -175,12 +179,12 @@ async function executeCommand(deps: AgentDeps, cmd: { id: number; type: string; 
   }
 }
 
-async function cycleOnce(deps: AgentDeps): Promise<void> {
+async function cycleOnce(deps: AgentDeps, tick: number): Promise<void> {
   const { db, paths } = deps
   baseUrl = serverOf(db)
   const machineId = machineIdOf(db)
 
-  // 1) 心跳 + 拉取指令
+  // 1) 心跳 + 拉取指令（每轮都做，指令延迟最低）
   const beat = await post('/agent/heartbeat', {
     machine_id: machineId,
     hostname: hostnameOf(),
@@ -190,31 +194,35 @@ async function cycleOnce(deps: AgentDeps): Promise<void> {
   })
   const commands: { id: number; type: string; payload: any }[] = beat.commands ?? []
 
-  // 2) 同步任务清单与最近运行记录（控制台页面直接展示这些数据）
-  const lastRunMap = new Map<string, string>(
-    (
-      db.prepare(
-        'SELECT task_id, MAX(started_at) AS last_run FROM runs GROUP BY task_id'
-      ).all() as { task_id: string; last_run: string }[]
-    ).map((r) => [r.task_id, r.last_run] as [string, string])
-  )
-  const tasks = listTasks(db, new Set(), paths).map((t) => ({
-    id: t.id,
-    name: t.name,
-    cron: t.cronExpr ?? '',
-    enabled: t.enabled ? 1 : 0,
-    last_run: lastRunMap.get(t.id) ?? null
-  }))
-  const runs = db
-    .prepare(
-      `SELECT r.id, r.task_id, r.status, r.trigger_type, r.started_at, r.finished_at, r.duration_ms,
-              r.error_summary AS message, t.name AS task_name
-       FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
-       ORDER BY r.id DESC LIMIT 100`
+  // 2) 任务清单与运行记录按较低频率同步（控制台页面展示用）
+  if (tick % SYNC_EVERY_TICKS === 0) {
+    const lastRunMap = new Map<string, string>(
+      (
+        db.prepare(
+          'SELECT task_id, MAX(started_at) AS last_run FROM runs GROUP BY task_id'
+        ).all() as { task_id: string; last_run: string }[]
+      ).map((r) => [r.task_id, r.last_run] as [string, string])
     )
-    .all()
-  await post('/agent/sync', { machine_id: machineId, tasks })
-  await post('/agent/runs', { machine_id: machineId, runs })
+    const runningIds = activeTaskIds()
+    const tasks = listTasks(db, new Set(), paths).map((t) => ({
+      id: t.id,
+      name: t.name,
+      cron: t.cronExpr ?? '',
+      enabled: t.enabled ? 1 : 0,
+      running: runningIds.has(t.id) ? 1 : 0,
+      last_run: lastRunMap.get(t.id) ?? null
+    }))
+    const runs = db
+      .prepare(
+        `SELECT r.id, r.task_id, r.status, r.trigger_type, r.started_at, r.finished_at, r.duration_ms,
+                r.error_summary AS message, t.name AS task_name
+         FROM runs r LEFT JOIN tasks t ON t.id = r.task_id
+         ORDER BY r.id DESC LIMIT 100`
+      )
+      .all()
+    await post('/agent/sync', { machine_id: machineId, tasks })
+    await post('/agent/runs', { machine_id: machineId, runs })
+  }
 
   // 3) 执行指令并回传结果
   const results: { id: number; ok: boolean; error?: string }[] = []
@@ -242,11 +250,11 @@ export function startCloudAgent(deps: AgentDeps): void {
   baseUrl = serverOf(deps.db)
   deps.log(`云端代理：已启动，服务器 ${baseUrl}，每 ${INTERVAL_MS / 1000} 秒心跳`)
 
-  const tick = async (): Promise<void> => {
+  const tick = async (n: number): Promise<void> => {
     if (inFlight) return
     inFlight = true
     try {
-      await cycleOnce(deps)
+      await cycleOnce(deps, n)
       if (lastOk !== true) {
         lastOk = true
         deps.log('云端代理：已连接控制台服务器')
@@ -260,9 +268,9 @@ export function startCloudAgent(deps: AgentDeps): void {
     } finally {
       inFlight = false
     }
-    timer = setTimeout(() => void tick(), INTERVAL_MS)
+    timer = setTimeout(() => void tick(n + 1), INTERVAL_MS)
   }
-  void tick()
+  void tick(0)
 }
 
 export function stopCloudAgent(): void {
