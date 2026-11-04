@@ -99,7 +99,7 @@ async function executeCommand(deps: AgentDeps, cmd: { id: number; type: string; 
         const sets: string[] = []
         const values: (string | number)[] = []
         if (typeof cmd.payload.cron === 'string') {
-          sets.push('cron = ?')
+          sets.push('cron_expr = ?')
           values.push(cmd.payload.cron)
         }
         if (typeof cmd.payload.enabled === 'number') {
@@ -139,7 +139,9 @@ async function executeCommand(deps: AgentDeps, cmd: { id: number; type: string; 
       }
       case 'create_task': {
         // 控制台远程创建任务（脚本来自已部署的包，路径为包内相对路径）
-        const payload = cmd.payload as {
+        // 兼容早期服务器双重 JSON 编码的 payload（字符串形式）
+        const raw = typeof cmd.payload === 'string' ? (JSON.parse(cmd.payload) as object) : cmd.payload
+        const payload = raw as {
           name: string
           script_path: string
           cron?: string
@@ -149,9 +151,15 @@ async function executeCommand(deps: AgentDeps, cmd: { id: number; type: string; 
           | { id: string }
           | undefined
         if (exists) return { ok: true } // 指令可能重发，幂等跳过
+        // 脚本在 packages\<包名>\ 下（deploy_scripts 的部署位置），
+        // createTask 只认 tasks\ 相对路径 / 绝对路径，这里转成绝对路径
+        const rel = payload.script_path.replace(/\\/g, '/')
+        if (!rel || rel.startsWith('/') || rel.split('/').includes('..')) {
+          return { ok: false, error: `脚本路径不合法：${payload.script_path}` }
+        }
         createTask(db, new Set(), paths, {
           name: payload.name,
-          scriptPath: payload.script_path,
+          scriptPath: join(paths.root, 'packages', ...rel.split('/')),
           condaEnv: 'base',
           cronExpr: payload.cron ?? null,
           enabled: payload.enabled !== 0
