@@ -499,7 +499,7 @@ export function registerIpc(
   ipcMain.handle('floating:list', (): TrackedRun[] => getTrackedRuns())
 
   /**
-   * 悬浮框点 ✕：关闭这张卡片。
+   * 悬浮框点 ✕：关闭这张卡片，并唤起客户端主界面。
    * 还在跑的先停进程 —— 卡片随即随下一次状态更新变成终态，再被移除。
    */
   ipcMain.handle('floating:dismiss', async (_event, runId: unknown): Promise<{ ok: boolean }> => {
@@ -507,9 +507,15 @@ export function registerIpc(
     const item = getTrackedRuns().find((run) => run.runId === runId)
     if (item?.active) {
       stopRun(runId)
-      return { ok: true }
+    } else {
+      dismissRun(runId)
     }
-    dismissRun(runId)
+    const main = getWindow()
+    if (main) {
+      if (main.isMinimized()) main.restore()
+      main.show()
+      main.focus()
+    }
     return { ok: true }
   })
 

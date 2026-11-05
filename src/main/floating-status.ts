@@ -88,6 +88,12 @@ export function getTrackedRuns(): TrackedRun[] {
 /** 运行开始或状态变化时调用；结束后卡片保留，只更新终态 */
 export function trackRun(run: RunView): void {
   const active = ACTIVE_STATUSES.includes(run.status)
+
+  // 同一流程（任务）只显示一张卡片：新 run 出现时顶掉同任务的旧卡片
+  for (const [key, item] of [...tracked]) {
+    if (item.taskId === run.taskId && item.runId !== run.id) tracked.delete(key)
+  }
+
   const existing = tracked.get(run.id)
 
   // 已经在跟踪、且这次事件没带来新信息（例如重复的 running 更新）就跳过，避免重绘刷屏

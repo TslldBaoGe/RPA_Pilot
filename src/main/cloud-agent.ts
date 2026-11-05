@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import os from 'node:os'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { getSetting, setSetting } from './core/settings'
 import { createTask, listTasks } from './core/tasks'
@@ -84,7 +84,10 @@ async function get(path: string, timeoutMs = 8000): Promise<any> {
   }
 }
 
-async function executeCommand(deps: AgentDeps, cmd: { id: number; type: string; payload: any }): Promise<{ ok: boolean; error?: string }> {
+async function executeCommand(
+  deps: AgentDeps,
+  cmd: { id: number; type: string; payload: any }
+): Promise<{ ok: boolean; error?: string; data?: string }> {
   const { db, paths } = deps
   try {
     switch (cmd.type) {
@@ -171,6 +174,21 @@ async function executeCommand(deps: AgentDeps, cmd: { id: number; type: string; 
         deps.log(`云端下发任务「${payload.name}」已创建（脚本：${payload.script_path}）`)
         return { ok: true }
       }
+      case 'get_run_log': {
+        // 管理后台查看运行日志：读该 run 的日志文件，超长取尾部
+        const runId = String(cmd.payload.run_id)
+        const row = db.prepare('SELECT log_path FROM runs WHERE id = ?').get(runId) as
+          | { log_path: string | null }
+          | undefined
+        if (!row?.log_path) return { ok: false, error: '找不到该运行的日志文件' }
+        const MAX_BYTES = 256 * 1024
+        const stat = statSync(row.log_path)
+        if (stat.size > MAX_BYTES) {
+          const buf = readFileSync(row.log_path)
+          return { ok: true, data: `…（日志过长，仅显示最后 256KB）\n${buf.subarray(buf.length - MAX_BYTES).toString('utf8')}` }
+        }
+        return { ok: true, data: readFileSync(row.log_path, 'utf8') }
+      }
       default:
         return { ok: false, error: `未知指令类型：${cmd.type}` }
     }
@@ -225,10 +243,10 @@ async function cycleOnce(deps: AgentDeps, tick: number): Promise<void> {
   }
 
   // 3) 执行指令并回传结果
-  const results: { id: number; ok: boolean; error?: string }[] = []
+  const results: { id: number; ok: boolean; error?: string; data?: string }[] = []
   for (const cmd of commands) {
     const outcome = await executeCommand(deps, cmd)
-    results.push({ id: cmd.id, ok: outcome.ok, error: outcome.error })
+    results.push({ id: cmd.id, ok: outcome.ok, error: outcome.error, data: outcome.data })
     deps.log(`云端指令 ${cmd.type} 执行${outcome.ok ? '成功' : `失败：${outcome.error ?? ''}`}`)
   }
   if (results.length > 0) {
